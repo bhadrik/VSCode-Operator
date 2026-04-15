@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.4
+
+- 调整调试快照输出：`debugSnapshot` 不再返回 `exception` 字段，避免误判异常断点。 / Updated debug snapshot output: `debugSnapshot` no longer returns the `exception` field to avoid exception-stop misclassification.
+- 明确异常断点判定入口：需使用 `debugGetExceptionInfo` 判断当前是否为异常断点。 / Clarified exception-stop detection: use `debugGetExceptionInfo` to determine whether the current stop is an exception.
+
 ## 1.2.3
 
 - 增强调试异常处理：`debugSnapshot/debugStatus/debugGetTopFrame` 现在返回 `stopKind/stopState/stopHint`，可区分 `exception` 与普通断点。 / Improved exception-stop handling: `debugSnapshot/debugStatus/debugGetTopFrame` now return `stopKind/stopState/stopHint` to distinguish `exception` from normal breakpoints.
