@@ -39,6 +39,8 @@ const SERVER_INSTRUCTIONS = [
   "Use dedicated tools for editor context: vscodeOperator_activeEditorSummary, vscodeOperator_hoverTopVisible, vscodeOperator_hoverAtPosition, and vscodeOperator_completionAt.",
   "When fixing code, prefer reading diagnostics via vscodeOperator_readProblems first.",
   "For debugger workflows, prefer vscodeOperator_debugSnapshot first to avoid guessing DAP ids (threadId/frameId/variablesReference).",
+  "Use vscodeOperator_debugSnapshot for stack/frame/scope context only; do not use it to decide whether the stop is an exception.",
+  "To determine whether the current stop is an exception, call vscodeOperator_debugGetExceptionInfo.",
   "Before starting a new debug session, stop stale sessions first; treat stop-before-start as the default safe policy unless explicit reuse is requested."
 ].join(" ");
 
@@ -56,6 +58,9 @@ const USAGE_GUIDE_TEXT = [
   "10) For generic MCP calls (initialize/tools/list/resources/list), workspacePath is optional.",
   "11) For workspace-specific requests in multi-workspace mode, include workspacePath in tool arguments or in resource URI query (e.g. vscode-operator://tools?workspacePath=<abs path>).",
   "12) For debugging, prefer vscodeOperator_debugSnapshot first to minimize roundtrips and obtain frame/variable context.",
+  "12.1) Do not use debugSnapshot to determine whether the current stop is an exception.",
+  "12.2) For exception-stop detection and stable exception fields, use vscodeOperator_debugGetExceptionInfo (optionally includeTopFrame=true).",
+  "12.3) If payload size matters, set compact=true on debugSnapshot/debugStatus.",
   "13) If you need low-level debug calls, do not guess ids: threadId <- debugGetThreads, frameId <- debugGetTopFrame/debugGetStackTrace, variablesReference <- debugGetScopes.",
   "14) If debugSnapshot/debugGetTopFrame returns no frame, pause first using debugControl(action='pause') or run to a breakpoint.",
   "15) Before calling debugStart for a new run, stop old sessions first using debugControl(action='stop') unless explicit session reuse is required.",

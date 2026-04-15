@@ -13,6 +13,7 @@ export {
 	DebugGetThreadsTool,
 	DebugGetTopFrameTool,
 	DebugSnapshotTool,
+	DebugGetExceptionInfoTool,
 	DebugGetStackTraceTool,
 	DebugGetScopesTool,
 	DebugGetVariablesTool,

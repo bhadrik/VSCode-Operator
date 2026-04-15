@@ -465,8 +465,8 @@
         ],
         "toolReferenceName": "debugSnapshot",
         "displayName": "Get Debug Snapshot",
-        "modelDescription": "Get a compact one-shot debug snapshot: top frame, scopes, variables, and optional expression evaluations.",
-        "userDescription": "Get one-shot debug snapshot.",
+        "modelDescription": "Get a one-shot debug snapshot: top frame, scopes, variables, and optional expression evaluations. Set compact=true for a short payload. Use this for execution context only; do not use it to determine whether the current stop is an exception. For exception-stop detection, call vscodeOperator_debugGetExceptionInfo.",
+        "userDescription": "Get one-shot debug snapshot for frame/scope context.",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
           "type": "object",
@@ -495,6 +495,38 @@
             "evaluateContext": {
               "type": "string",
               "description": "DAP evaluate context, default watch"
+            },
+            "compact": {
+              "type": "boolean",
+              "description": "If true, return a minimal payload and skip scopes/variables/evaluations."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_debugGetExceptionInfo",
+        "tags": [
+          "vscode",
+          "debug",
+          "exception"
+        ],
+        "toolReferenceName": "debugGetExceptionInfo",
+        "displayName": "Get Exception Info",
+        "modelDescription": "Determine whether the current debug stop is an exception and read stable exception-stop information from the active debug session. Returns a short payload with normalized exception fields.",
+        "userDescription": "Determine whether the current stop is an exception and read exception info.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "number"
+            },
+            "includeTopFrame": {
+              "type": "boolean",
+              "description": "If true, include a compact top frame summary."
             }
           }
         }
@@ -632,7 +664,7 @@
         ],
         "toolReferenceName": "debugStatus",
         "displayName": "Get Debug Status",
-        "modelDescription": "Get current debug sessions, breakpoint summary, and thread preview.",
+        "modelDescription": "Get current debug sessions, breakpoint summary, and thread preview. Set compact=true for a short payload.",
         "userDescription": "Get debug status snapshot.",
         "canBeReferencedInPrompt": true,
         "inputSchema": {
@@ -640,6 +672,10 @@
           "properties": {
             "sessionId": {
               "type": "string"
+            },
+            "compact": {
+              "type": "boolean",
+              "description": "If true, return only essential status fields."
             }
           }
         }
