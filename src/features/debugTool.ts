@@ -116,6 +116,8 @@ type DebugExceptionInfo = {
   at: string | null;
 };
 
+type AdapterExceptionQueryState = "supported" | "unsupported-or-unavailable";
+
 const knownSessions = new Map<string, vscode.DebugSession>();
 const lastStopBySession = new Map<string, DebugStopState>();
 let sessionTrackingInitialized = false;
@@ -739,7 +741,6 @@ export class DebugSnapshotTool implements vscode.LanguageModelTool<DebugSnapshot
       : null;
     const frameId = topFrame && typeof topFrame.id === "number" ? topFrame.id : undefined;
     const stopState = getStopState(session);
-    const stopKind = classifyStopKind(stopState);
     const compact = Boolean(input.compact);
 
     if (frameId === undefined) {
@@ -748,7 +749,6 @@ export class DebugSnapshotTool implements vscode.LanguageModelTool<DebugSnapshot
           session: toDebugSessionSummary(session),
           threadId,
           paused: false,
-          stopKind,
           topFrame: null,
           note: "No top frame is available. The debugger may be running instead of paused. Use vscodeOperator_debugGetExceptionInfo to determine whether the current stop is an exception."
         });
@@ -758,8 +758,6 @@ export class DebugSnapshotTool implements vscode.LanguageModelTool<DebugSnapshot
         session: toDebugSessionSummary(session),
         threadId,
         stopState: stopState ?? null,
-        stopKind,
-        stopHint: stopHandlingHint(stopKind) ?? null,
         paused: false,
         topFrame: null,
         scopes: [],
@@ -773,7 +771,6 @@ export class DebugSnapshotTool implements vscode.LanguageModelTool<DebugSnapshot
         session: toDebugSessionSummary(session),
         threadId,
         paused: true,
-        stopKind,
         topFrame: toCompactFrame(topFrame)
       });
     }
@@ -850,8 +847,6 @@ export class DebugSnapshotTool implements vscode.LanguageModelTool<DebugSnapshot
       session: toDebugSessionSummary(session),
       threadId,
       stopState: stopState ?? null,
-      stopKind,
-      stopHint: stopHandlingHint(stopKind) ?? null,
       paused: true,
       topFrame,
       totalFrames: typeof stack.totalFrames === "number" ? stack.totalFrames : undefined,
@@ -934,9 +929,10 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
     const stopKind = classifyStopKind(stopState);
     let exception = toExceptionInfo(stopState);
     const includeTopFrame = Boolean(input.includeTopFrame);
+    let isException = stopKind === "exception";
 
     let adapterException: JsonObject | null = null;
-    let adapterExceptionQuery: "supported" | "unsupported-or-unavailable" = "unsupported-or-unavailable";
+    let adapterExceptionQuery: AdapterExceptionQueryState = "unsupported-or-unavailable";
     try {
       const preferredThreadId = typeof input.threadId === "number"
         ? input.threadId
@@ -953,19 +949,37 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
         message: adapterMessage ?? exception.message,
         threadId
       };
+      isException = true;
     } catch {
       // Some adapters don't support exceptionInfo, or current stop is not an exception.
     }
 
+    if (!isException) {
+      // Keep payload clean on non-exception stops so breakpoint/step results are not noisy.
+      exception = {
+        ...exception,
+        isException: false,
+        message: null,
+        reason: stopState?.reason ?? null,
+        description: null,
+        text: null
+      };
+    }
+
+    const basePayload: JsonObject = {
+      session: toDebugSessionSummary(session),
+      stopKind,
+      isException,
+      paused: stopState !== undefined,
+      adapterExceptionQuery,
+      adapterException
+    };
+    if (isException) {
+      basePayload.exception = exception;
+    }
+
     if (!includeTopFrame) {
-      return toResult({
-        session: toDebugSessionSummary(session),
-        stopKind,
-        paused: stopState !== undefined,
-        exception,
-        adapterExceptionQuery,
-        adapterException
-      });
+      return toResult(basePayload);
     }
 
     let topFrame: JsonObject | null = null;
@@ -983,14 +997,7 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
       topFrame = null;
     }
 
-    return toResult({
-      session: toDebugSessionSummary(session),
-      stopKind,
-      paused: stopState !== undefined,
-      exception,
-      adapterExceptionQuery,
-      adapterException,
-      topFrame
-    });
+    basePayload.topFrame = topFrame;
+    return toResult(basePayload);
   }
 }

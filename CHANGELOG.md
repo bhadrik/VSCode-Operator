@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.5
+
+- 优化异常信息返回：仅在 `isException=true` 的异常停靠场景返回 `exception` 详情，减少普通断点与单步时的噪音。 / Refined exception payload behavior: `exception` details are returned only when `isException=true` (exception stops), reducing noise on normal breakpoints and stepping.
+- 增加异常判定一致性：统一输出 `isException` 语义，并在调试适配器可用时补充异常能力探测结果。 / Improved exception classification consistency: unified `isException` semantics and added adapter exception-capability probing output when available.
+
 ## 1.2.4
 
 - 调整调试快照输出：`debugSnapshot` 不再返回 `exception` 字段，避免误判异常断点。 / Updated debug snapshot output: `debugSnapshot` no longer returns the `exception` field to avoid exception-stop misclassification.
