@@ -116,7 +116,7 @@ type DebugExceptionInfo = {
   at: string | null;
 };
 
-type AdapterExceptionQueryState = "supported" | "unsupported-or-unavailable";
+type AdapterExceptionQueryState = "supported" | "unsupported-or-unavailable" | "not-paused";
 
 const knownSessions = new Map<string, vscode.DebugSession>();
 const lastStopBySession = new Map<string, DebugStopState>();
@@ -983,30 +983,38 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
     const includeTopFrame = Boolean(input.includeTopFrame);
     let isException = stopKind === "exception";
 
-    let adapterException: JsonObject | null = null;
-    let adapterExceptionQuery: AdapterExceptionQueryState = "unsupported-or-unavailable";
-    try {
-      const preferredThreadId = typeof input.threadId === "number"
-        ? input.threadId
-        : stopState?.threadId;
-      const threadId = await resolveThreadId(session, preferredThreadId);
-      const exceptionInfo = await customRequest(session, "exceptionInfo", { threadId });
-      adapterException = toCompactAdapterException(exceptionInfo);
-      adapterExceptionQuery = "supported";
+    // If stopState is absent the debugger is likely still running; skip live DAP queries
+    // that would either fail noisily or return misleading results.
+    const likelyPaused = stopState !== undefined;
 
-      const adapterMessage = pickAdapterExceptionMessage(exceptionInfo);
-      const adapterReportsException = hasAdapterExceptionDetails(exceptionInfo);
-      if (adapterReportsException || stopKind === "exception") {
-        exception = {
-          ...exception,
-          isException: true,
-          message: adapterMessage ?? exception.message,
-          threadId
-        };
-        isException = true;
+    let adapterException: JsonObject | null = null;
+    let adapterExceptionQuery: AdapterExceptionQueryState = likelyPaused
+      ? "unsupported-or-unavailable"
+      : "not-paused";
+    if (likelyPaused) {
+      try {
+        const preferredThreadId = typeof input.threadId === "number"
+          ? input.threadId
+          : stopState?.threadId;
+        const threadId = await resolveThreadId(session, preferredThreadId);
+        const exceptionInfo = await customRequest(session, "exceptionInfo", { threadId });
+        adapterException = toCompactAdapterException(exceptionInfo);
+        adapterExceptionQuery = "supported";
+
+        const adapterMessage = pickAdapterExceptionMessage(exceptionInfo);
+        const adapterReportsException = hasAdapterExceptionDetails(exceptionInfo);
+        if (adapterReportsException || stopKind === "exception") {
+          exception = {
+            ...exception,
+            isException: true,
+            message: adapterMessage ?? exception.message,
+            threadId
+          };
+          isException = true;
+        }
+      } catch {
+        // Some adapters don't support exceptionInfo, or current stop is not an exception.
       }
-    } catch {
-      // Some adapters don't support exceptionInfo, or current stop is not an exception.
     }
 
     if (!isException) {
@@ -1023,25 +1031,27 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
 
     let rawTopFrame: Record<string, unknown> | null = null;
     let topFrame: JsonObject | null = null;
-    let paused = stopState !== undefined;
-    try {
-      const preferredThreadId = typeof input.threadId === "number"
-        ? input.threadId
-        : stopState?.threadId;
-      const threadId = await resolveThreadId(session, preferredThreadId);
-      const stack = await customRequest(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
-        stackFrames?: Array<Record<string, unknown>>;
-      };
-      rawTopFrame = Array.isArray(stack.stackFrames) && stack.stackFrames.length > 0 ? stack.stackFrames[0] : null;
-      if (rawTopFrame) {
-        paused = true;
-      }
-      if (includeTopFrame) {
-        topFrame = toCompactFrame(rawTopFrame);
-      }
-    } catch {
-      if (includeTopFrame) {
-        topFrame = null;
+    let paused = likelyPaused;
+    if (likelyPaused || includeTopFrame) {
+      try {
+        const preferredThreadId = typeof input.threadId === "number"
+          ? input.threadId
+          : stopState?.threadId;
+        const threadId = await resolveThreadId(session, preferredThreadId);
+        const stack = await customRequest(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
+          stackFrames?: Array<Record<string, unknown>>;
+        };
+        rawTopFrame = Array.isArray(stack.stackFrames) && stack.stackFrames.length > 0 ? stack.stackFrames[0] : null;
+        if (rawTopFrame) {
+          paused = true;
+        }
+        if (includeTopFrame) {
+          topFrame = toCompactFrame(rawTopFrame);
+        }
+      } catch {
+        if (includeTopFrame) {
+          topFrame = null;
+        }
       }
     }
 
