@@ -392,6 +392,31 @@ function pickAdapterExceptionMessage(value: unknown): string | null {
   return null;
 }
 
+function hasAdapterExceptionDetails(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const info = value as Record<string, unknown>;
+  if (typeof info.exceptionId === "string" && info.exceptionId.trim().length > 0) {
+    return true;
+  }
+
+  if (typeof info.description === "string" && info.description.trim().length > 0) {
+    return true;
+  }
+
+  const details = info.details;
+  if (details && typeof details === "object") {
+    const detailMessage = (details as Record<string, unknown>).message;
+    if (typeof detailMessage === "string" && detailMessage.trim().length > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function toCompactAdapterException(value: unknown): JsonObject | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -403,6 +428,33 @@ function toCompactAdapterException(value: unknown): JsonObject | null {
     description: typeof info.description === "string" ? info.description : null,
     breakMode: typeof info.breakMode === "string" ? info.breakMode : null
   };
+}
+
+function isLikelyBreakpointStop(frame: Record<string, unknown> | null): boolean {
+  if (!frame) {
+    return false;
+  }
+
+  const source = frame.source && typeof frame.source === "object"
+    ? frame.source as Record<string, unknown>
+    : undefined;
+  const sourcePath = typeof source?.path === "string" ? source.path : undefined;
+  const line = typeof frame.line === "number" ? frame.line : undefined;
+  if (!sourcePath || !line || line <= 0) {
+    return false;
+  }
+
+  const normalizedFramePath = normalizeForCompare(sourcePath);
+  return vscode.debug.breakpoints
+    .filter((bp): bp is vscode.SourceBreakpoint => bp instanceof vscode.SourceBreakpoint)
+    .some((bp) => {
+      if (!bp.enabled) {
+        return false;
+      }
+      const bpPath = normalizeForCompare(bp.location.uri.fsPath);
+      const bpLine = bp.location.range.start.line + 1;
+      return bpPath === normalizedFramePath && bpLine === line;
+    });
 }
 
 export class DebugStartTool implements vscode.LanguageModelTool<DebugStartInput> {
@@ -943,13 +995,16 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
       adapterExceptionQuery = "supported";
 
       const adapterMessage = pickAdapterExceptionMessage(exceptionInfo);
-      exception = {
-        ...exception,
-        isException: true,
-        message: adapterMessage ?? exception.message,
-        threadId
-      };
-      isException = true;
+      const adapterReportsException = hasAdapterExceptionDetails(exceptionInfo);
+      if (adapterReportsException || stopKind === "exception") {
+        exception = {
+          ...exception,
+          isException: true,
+          message: adapterMessage ?? exception.message,
+          threadId
+        };
+        isException = true;
+      }
     } catch {
       // Some adapters don't support exceptionInfo, or current stop is not an exception.
     }
@@ -966,11 +1021,39 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
       };
     }
 
+    let rawTopFrame: Record<string, unknown> | null = null;
+    let topFrame: JsonObject | null = null;
+    let paused = stopState !== undefined;
+    try {
+      const preferredThreadId = typeof input.threadId === "number"
+        ? input.threadId
+        : stopState?.threadId;
+      const threadId = await resolveThreadId(session, preferredThreadId);
+      const stack = await customRequest(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
+        stackFrames?: Array<Record<string, unknown>>;
+      };
+      rawTopFrame = Array.isArray(stack.stackFrames) && stack.stackFrames.length > 0 ? stack.stackFrames[0] : null;
+      if (rawTopFrame) {
+        paused = true;
+      }
+      if (includeTopFrame) {
+        topFrame = toCompactFrame(rawTopFrame);
+      }
+    } catch {
+      if (includeTopFrame) {
+        topFrame = null;
+      }
+    }
+
+    const normalizedStopKind = stopKind
+      ?? (paused
+        ? (isLikelyBreakpointStop(rawTopFrame) ? "breakpoint" : "other")
+        : null);
     const basePayload: JsonObject = {
       session: toDebugSessionSummary(session),
-      stopKind,
+      stopKind: normalizedStopKind,
       isException,
-      paused: stopState !== undefined,
+      paused,
       adapterExceptionQuery,
       adapterException
     };
@@ -980,21 +1063,6 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
 
     if (!includeTopFrame) {
       return toResult(basePayload);
-    }
-
-    let topFrame: JsonObject | null = null;
-    try {
-      const preferredThreadId = typeof input.threadId === "number"
-        ? input.threadId
-        : stopState?.threadId;
-      const threadId = await resolveThreadId(session, preferredThreadId);
-      const stack = await customRequest(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
-        stackFrames?: Array<Record<string, unknown>>;
-      };
-      const frame = Array.isArray(stack.stackFrames) && stack.stackFrames.length > 0 ? stack.stackFrames[0] : null;
-      topFrame = toCompactFrame(frame);
-    } catch {
-      topFrame = null;
     }
 
     basePayload.topFrame = topFrame;
