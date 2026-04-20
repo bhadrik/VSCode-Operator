@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.6
+
+- 修复异常误判：普通断点不再因调试适配器支持 `exceptionInfo` 而被标记为异常停靠。 / Fixed false exception classification: normal breakpoints are no longer marked as exception stops just because the adapter supports `exceptionInfo`.
+- 改进停靠状态一致性：在缺少 `stopped` 原因时，基于栈帧与断点位置推断 `paused/stopKind`，减少 `paused=false` 与栈帧并存的矛盾输出。 / Improved stop-state consistency: when `stopped` reason is unavailable, infer `paused/stopKind` from top frame and breakpoint location to avoid contradictory outputs like `paused=false` with a valid stack frame.
+
 ## 1.2.5
 
 - 优化异常信息返回：仅在 `isException=true` 的异常停靠场景返回 `exception` 详情，减少普通断点与单步时的噪音。 / Refined exception payload behavior: `exception` details are returned only when `isException=true` (exception stops), reducing noise on normal breakpoints and stepping.
