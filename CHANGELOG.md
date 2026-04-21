@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.7
+
+- 修复运行态超时：`debugGetExceptionInfo/debugStatus/debugGetTopFrame/debugSnapshot` 增加有界探测，目标未停靠时快速返回，避免请求挂起。 / Fixed runtime timeout behavior: added bounded probing in `debugGetExceptionInfo/debugStatus/debugGetTopFrame/debugSnapshot` so calls return quickly when the target is running instead of hanging.
+- 改进状态一致性：`debugStatus` 在缺少缓存停靠事件时增加实时线程与栈帧兜底，异常/断点判定更稳定。 / Improved state consistency: `debugStatus` now falls back to live thread and top-frame probing when cached stop events are missing, making exception/breakpoint classification more reliable.
+
 ## 1.2.6
 
 - 修复异常误判：普通断点不再因调试适配器支持 `exceptionInfo` 而被标记为异常停靠。 / Fixed false exception classification: normal breakpoints are no longer marked as exception stops just because the adapter supports `exceptionInfo`.
