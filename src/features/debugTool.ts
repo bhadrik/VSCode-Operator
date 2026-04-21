@@ -118,6 +118,8 @@ type DebugExceptionInfo = {
 
 type AdapterExceptionQueryState = "supported" | "unsupported-or-unavailable" | "not-paused";
 
+const DEBUG_PROBE_TIMEOUT_MS = 1200;
+
 const knownSessions = new Map<string, vscode.DebugSession>();
 const lastStopBySession = new Map<string, DebugStopState>();
 let sessionTrackingInitialized = false;
@@ -237,6 +239,53 @@ async function customRequest(
   } catch (error) {
     throw new Error(`DAP request '${command}' failed: ${error instanceof Error ? error.message : String(error)} ${dapHintText()}`);
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && /timed out/i.test(error.message);
+}
+
+async function resolveThreadIdWithTimeout(
+  session: vscode.DebugSession,
+  inputThreadId?: number,
+  timeoutMs: number = DEBUG_PROBE_TIMEOUT_MS
+): Promise<number> {
+  return withTimeout(
+    resolveThreadId(session, inputThreadId),
+    timeoutMs,
+    `Resolve debug thread timed out after ${timeoutMs}ms`
+  );
+}
+
+async function customRequestWithTimeout(
+  session: vscode.DebugSession,
+  command: string,
+  args?: JsonObject,
+  timeoutMs: number = DEBUG_PROBE_TIMEOUT_MS
+): Promise<unknown> {
+  return withTimeout(
+    customRequest(session, command, args),
+    timeoutMs,
+    `DAP request '${command}' timed out after ${timeoutMs}ms`
+  );
 }
 
 async function getThreads(session: vscode.DebugSession): Promise<DapThread[]> {
@@ -750,11 +799,34 @@ export class DebugGetTopFrameTool implements vscode.LanguageModelTool<DebugGetTo
       return toError("No debug session is active. Call vscodeOperator_debugStart first, or inspect existing sessions via vscodeOperator_debugStatus.");
     }
 
-    const threadId = await resolveThreadId(session, input.threadId);
-    const response = await customRequest(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
+    let threadId: number;
+    let response: {
       stackFrames?: unknown[];
       totalFrames?: number;
     };
+    try {
+      threadId = await resolveThreadIdWithTimeout(session, input.threadId);
+      response = await customRequestWithTimeout(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
+        stackFrames?: unknown[];
+        totalFrames?: number;
+      };
+    } catch (error) {
+      const stopState = getStopState(session);
+      const stopKind = classifyStopKind(stopState);
+      return toResult({
+        session: toDebugSessionSummary(session),
+        threadId: input.threadId ?? null,
+        stopState: stopState ?? null,
+        stopKind,
+        stopHint: stopHandlingHint(stopKind) ?? null,
+        topFrame: null,
+        totalFrames: 0,
+        paused: false,
+        note: isTimeoutError(error)
+          ? "Live stack probing timed out. The target may be running or adapter did not respond in time."
+          : "Live stack probing failed. The target may be running or adapter does not support stackTrace at this moment."
+      });
+    }
 
     const frames = Array.isArray(response.stackFrames) ? response.stackFrames : [];
     const topFrame = frames.length > 0 ? frames[0] : null;
@@ -782,11 +854,43 @@ export class DebugSnapshotTool implements vscode.LanguageModelTool<DebugSnapshot
       return toError("No debug session is active. Call vscodeOperator_debugStart first, or inspect existing sessions via vscodeOperator_debugStatus.");
     }
 
-    const threadId = await resolveThreadId(session, input.threadId);
-    const stack = await customRequest(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
+    let threadId: number;
+    let stack: {
       stackFrames?: Array<Record<string, unknown>>;
       totalFrames?: number;
     };
+    try {
+      threadId = await resolveThreadIdWithTimeout(session, input.threadId);
+      stack = await customRequestWithTimeout(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
+        stackFrames?: Array<Record<string, unknown>>;
+        totalFrames?: number;
+      };
+    } catch (error) {
+      const compact = Boolean(input.compact);
+      const timeoutNote = isTimeoutError(error)
+        ? "Live stack probing timed out. The debugger is likely running or adapter did not respond in time."
+        : "Live stack probing failed. The debugger may be running instead of paused.";
+      if (compact) {
+        return toResult({
+          session: toDebugSessionSummary(session),
+          threadId: input.threadId ?? null,
+          paused: false,
+          topFrame: null,
+          note: `${timeoutNote} Use vscodeOperator_debugGetExceptionInfo to determine whether the current stop is an exception.`
+        });
+      }
+
+      return toResult({
+        session: toDebugSessionSummary(session),
+        threadId: input.threadId ?? null,
+        stopState: getStopState(session) ?? null,
+        paused: false,
+        topFrame: null,
+        scopes: [],
+        evaluations: [],
+        note: `${timeoutNote} Use vscodeOperator_debugControl(action='pause') and retry, or continue to a breakpoint. Use vscodeOperator_debugGetExceptionInfo to determine whether the current stop is an exception.`
+      });
+    }
 
     const topFrame = Array.isArray(stack.stackFrames) && stack.stackFrames.length > 0
       ? stack.stackFrames[0]
@@ -928,13 +1032,74 @@ export class DebugStatusTool implements vscode.LanguageModelTool<DebugStatusInpu
 
     let threadPreview: DapThread[] | undefined;
     const stopState = selected ? getStopState(selected) : undefined;
-    const stopKind = classifyStopKind(stopState);
-    const exception = toExceptionInfo(stopState);
+    let stopKind = classifyStopKind(stopState);
+    let exception = toExceptionInfo(stopState);
+    let paused = stopState !== undefined;
+    let topFrame: Record<string, unknown> | null = null;
+    let probeNote: string | undefined;
+
     if (selected) {
       try {
-        threadPreview = await getThreads(selected);
-      } catch {
+        threadPreview = await withTimeout(getThreads(selected), DEBUG_PROBE_TIMEOUT_MS, `DAP request 'threads' timed out after ${DEBUG_PROBE_TIMEOUT_MS}ms`);
+      } catch (error) {
         threadPreview = undefined;
+        if (isTimeoutError(error)) {
+          probeNote = "Thread probing timed out.";
+        }
+      }
+
+      if (threadPreview && threadPreview.length > 0) {
+        const preferredThreadId = stopState?.threadId ?? threadPreview[0].id;
+        try {
+          const stack = await customRequestWithTimeout(selected, "stackTrace", {
+            threadId: preferredThreadId,
+            startFrame: 0,
+            levels: 1
+          }) as {
+            stackFrames?: Array<Record<string, unknown>>;
+          };
+          topFrame = Array.isArray(stack.stackFrames) && stack.stackFrames.length > 0 ? stack.stackFrames[0] : null;
+          paused = topFrame !== null;
+        } catch (error) {
+          paused = false;
+          if (isTimeoutError(error)) {
+            probeNote = "Live stack probing timed out.";
+          }
+        }
+
+        if (paused) {
+          if (!stopKind) {
+            stopKind = isLikelyBreakpointStop(topFrame) ? "breakpoint" : "other";
+          }
+          try {
+            const exceptionInfo = await customRequestWithTimeout(selected, "exceptionInfo", { threadId: preferredThreadId });
+            if (hasAdapterExceptionDetails(exceptionInfo)) {
+              stopKind = "exception";
+              exception = {
+                isException: true,
+                message: pickAdapterExceptionMessage(exceptionInfo),
+                reason: "exception",
+                description: toCompactAdapterException(exceptionInfo)?.description as string | null,
+                text: null,
+                threadId: preferredThreadId,
+                at: stopState?.at ?? null
+              };
+            }
+          } catch {
+            // Non-exception stop or adapter doesn't support exceptionInfo.
+          }
+        } else {
+          stopKind = null;
+          exception = {
+            isException: false,
+            message: null,
+            reason: null,
+            description: null,
+            text: null,
+            threadId: null,
+            at: null
+          };
+        }
       }
     }
 
@@ -943,12 +1108,14 @@ export class DebugStatusTool implements vscode.LanguageModelTool<DebugStatusInpu
         activeSession: selected ? toDebugSessionSummary(selected) : null,
         stopKind,
         exception,
+        paused,
         breakpoints: {
           total: vscode.debug.breakpoints.length
         },
         threads: {
           total: threadPreview?.length ?? 0
-        }
+        },
+        note: probeNote ?? null
       });
     }
 
@@ -961,9 +1128,12 @@ export class DebugStatusTool implements vscode.LanguageModelTool<DebugStatusInpu
       },
       stopState: stopState ?? null,
       stopKind,
+      paused,
       stopHint: stopHandlingHint(stopKind) ?? null,
       exception,
       threads: threadPreview ?? null,
+      topFrame: toCompactFrame(topFrame),
+      probeNote: probeNote ?? null,
       note: "Paused/running state is debugger-adapter specific. Use debug_get_stacktrace/debug_get_scopes/debug_get_variables for live inspection."
     });
   }
@@ -983,21 +1153,51 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
     const includeTopFrame = Boolean(input.includeTopFrame);
     let isException = stopKind === "exception";
 
-    // If stopState is absent the debugger is likely still running; skip live DAP queries
-    // that would either fail noisily or return misleading results.
+    // stopState can become stale if the adapter doesn't emit a reliable continued event,
+    // so we confirm pause state via a bounded live stack probe.
     const likelyPaused = stopState !== undefined;
 
-    let adapterException: JsonObject | null = null;
-    let adapterExceptionQuery: AdapterExceptionQueryState = likelyPaused
-      ? "unsupported-or-unavailable"
-      : "not-paused";
-    if (likelyPaused) {
+    let rawTopFrame: Record<string, unknown> | null = null;
+    let topFrame: JsonObject | null = null;
+    let paused = false;
+    let resolvedThreadId: number | undefined;
+    if (likelyPaused || includeTopFrame) {
       try {
         const preferredThreadId = typeof input.threadId === "number"
           ? input.threadId
           : stopState?.threadId;
-        const threadId = await resolveThreadId(session, preferredThreadId);
-        const exceptionInfo = await customRequest(session, "exceptionInfo", { threadId });
+        resolvedThreadId = await resolveThreadIdWithTimeout(session, preferredThreadId);
+        const stack = await customRequestWithTimeout(session, "stackTrace", {
+          threadId: resolvedThreadId,
+          startFrame: 0,
+          levels: 1
+        }) as {
+          stackFrames?: Array<Record<string, unknown>>;
+        };
+        rawTopFrame = Array.isArray(stack.stackFrames) && stack.stackFrames.length > 0 ? stack.stackFrames[0] : null;
+        paused = rawTopFrame !== null;
+        if (includeTopFrame) {
+          topFrame = toCompactFrame(rawTopFrame);
+        }
+      } catch {
+        paused = false;
+        if (includeTopFrame) {
+          topFrame = null;
+        }
+      }
+    }
+
+    let adapterException: JsonObject | null = null;
+    let adapterExceptionQuery: AdapterExceptionQueryState = paused
+      ? "unsupported-or-unavailable"
+      : "not-paused";
+    if (paused) {
+      try {
+        const threadId = resolvedThreadId ?? await resolveThreadIdWithTimeout(
+          session,
+          typeof input.threadId === "number" ? input.threadId : stopState?.threadId
+        );
+        const exceptionInfo = await customRequestWithTimeout(session, "exceptionInfo", { threadId });
         adapterException = toCompactAdapterException(exceptionInfo);
         adapterExceptionQuery = "supported";
 
@@ -1012,9 +1212,17 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
           };
           isException = true;
         }
-      } catch {
+      } catch (error) {
+        if (isTimeoutError(error)) {
+          adapterExceptionQuery = "not-paused";
+          paused = false;
+        }
         // Some adapters don't support exceptionInfo, or current stop is not an exception.
       }
+    }
+
+    if (!paused) {
+      isException = false;
     }
 
     if (!isException) {
@@ -1023,36 +1231,10 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
         ...exception,
         isException: false,
         message: null,
-        reason: stopState?.reason ?? null,
+        reason: paused ? (stopState?.reason ?? null) : null,
         description: null,
         text: null
       };
-    }
-
-    let rawTopFrame: Record<string, unknown> | null = null;
-    let topFrame: JsonObject | null = null;
-    let paused = likelyPaused;
-    if (likelyPaused || includeTopFrame) {
-      try {
-        const preferredThreadId = typeof input.threadId === "number"
-          ? input.threadId
-          : stopState?.threadId;
-        const threadId = await resolveThreadId(session, preferredThreadId);
-        const stack = await customRequest(session, "stackTrace", { threadId, startFrame: 0, levels: 1 }) as {
-          stackFrames?: Array<Record<string, unknown>>;
-        };
-        rawTopFrame = Array.isArray(stack.stackFrames) && stack.stackFrames.length > 0 ? stack.stackFrames[0] : null;
-        if (rawTopFrame) {
-          paused = true;
-        }
-        if (includeTopFrame) {
-          topFrame = toCompactFrame(rawTopFrame);
-        }
-      } catch {
-        if (includeTopFrame) {
-          topFrame = null;
-        }
-      }
     }
 
     const normalizedStopKind = stopKind
