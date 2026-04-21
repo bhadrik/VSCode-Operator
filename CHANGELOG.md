@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.8
+
+- 统一调试状态语义：为 `stopKind/isException/paused/exception` 增加共享归一化逻辑，避免字段组合互相矛盾。 / Unified debug-state semantics: added shared normalization for `stopKind/isException/paused/exception` to prevent contradictory field combinations.
+- 修复异常停靠漏判：`debugGetExceptionInfo` 现在始终执行有界实时停靠探测，即使缺少缓存 `stopState` 也能正确识别异常停靠。 / Fixed exception-stop false negatives: `debugGetExceptionInfo` now always performs bounded live pause probing, so exception stops are detected even when cached `stopState` is missing.
+
 ## 1.2.7
 
 - 修复运行态超时：`debugGetExceptionInfo/debugStatus/debugGetTopFrame/debugSnapshot` 增加有界探测，目标未停靠时快速返回，避免请求挂起。 / Fixed runtime timeout behavior: added bounded probing in `debugGetExceptionInfo/debugStatus/debugGetTopFrame/debugSnapshot` so calls return quickly when the target is running instead of hanging.

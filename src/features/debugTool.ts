@@ -506,6 +506,75 @@ function isLikelyBreakpointStop(frame: Record<string, unknown> | null): boolean 
     });
 }
 
+function emptyExceptionInfo(): DebugExceptionInfo {
+  return {
+    isException: false,
+    message: null,
+    reason: null,
+    description: null,
+    text: null,
+    threadId: null,
+    at: null
+  };
+}
+
+function normalizeStopSemantics(params: {
+  paused: boolean;
+  stopKind: ReturnType<typeof classifyStopKind>;
+  isException?: boolean;
+  exception?: DebugExceptionInfo | null;
+  topFrame?: Record<string, unknown> | null;
+}): {
+  paused: boolean;
+  stopKind: ReturnType<typeof classifyStopKind>;
+  isException: boolean;
+  exception: DebugExceptionInfo;
+} {
+  let paused = params.paused;
+  let stopKind = params.stopKind;
+  let isException = Boolean(params.isException);
+  let exception = params.exception ?? emptyExceptionInfo();
+
+  if (!paused) {
+    return {
+      paused: false,
+      stopKind: null,
+      isException: false,
+      exception: emptyExceptionInfo()
+    };
+  }
+
+  if (!stopKind) {
+    stopKind = isLikelyBreakpointStop(params.topFrame ?? null) ? "breakpoint" : "other";
+  }
+
+  if (stopKind === "exception") {
+    isException = true;
+  }
+
+  if (isException) {
+    paused = true;
+    stopKind = "exception";
+    exception = {
+      ...exception,
+      isException: true,
+      reason: exception.reason ?? "exception"
+    };
+  } else {
+    exception = {
+      ...exception,
+      isException: false
+    };
+  }
+
+  return {
+    paused,
+    stopKind,
+    isException,
+    exception
+  };
+}
+
 export class DebugStartTool implements vscode.LanguageModelTool<DebugStartInput> {
   async invoke(options: vscode.LanguageModelToolInvocationOptions<DebugStartInput>): Promise<vscode.LanguageModelToolResult> {
     const input = options.input;
@@ -832,16 +901,21 @@ export class DebugGetTopFrameTool implements vscode.LanguageModelTool<DebugGetTo
     const topFrame = frames.length > 0 ? frames[0] : null;
     const stopState = getStopState(session);
     const stopKind = classifyStopKind(stopState);
+    const normalized = normalizeStopSemantics({
+      paused: topFrame !== null,
+      stopKind,
+      topFrame: topFrame as Record<string, unknown> | null
+    });
 
     return toResult({
       session: toDebugSessionSummary(session),
       threadId,
       stopState: stopState ?? null,
-      stopKind,
-      stopHint: stopHandlingHint(stopKind) ?? null,
+      stopKind: normalized.stopKind,
+      stopHint: stopHandlingHint(normalized.stopKind) ?? null,
       topFrame,
       totalFrames: typeof response.totalFrames === "number" ? response.totalFrames : frames.length,
-      paused: topFrame !== null
+      paused: normalized.paused
     });
   }
 }
@@ -1103,12 +1177,20 @@ export class DebugStatusTool implements vscode.LanguageModelTool<DebugStatusInpu
       }
     }
 
+    const normalizedStatus = normalizeStopSemantics({
+      paused,
+      stopKind,
+      isException: exception.isException,
+      exception,
+      topFrame
+    });
+
     if (compact) {
       return toResult({
         activeSession: selected ? toDebugSessionSummary(selected) : null,
-        stopKind,
-        exception,
-        paused,
+        stopKind: normalizedStatus.stopKind,
+        exception: normalizedStatus.exception,
+        paused: normalizedStatus.paused,
         breakpoints: {
           total: vscode.debug.breakpoints.length
         },
@@ -1127,10 +1209,10 @@ export class DebugStatusTool implements vscode.LanguageModelTool<DebugStatusInpu
         sourceByFile: breakpointsByFile
       },
       stopState: stopState ?? null,
-      stopKind,
-      paused,
-      stopHint: stopHandlingHint(stopKind) ?? null,
-      exception,
+      stopKind: normalizedStatus.stopKind,
+      paused: normalizedStatus.paused,
+      stopHint: stopHandlingHint(normalizedStatus.stopKind) ?? null,
+      exception: normalizedStatus.exception,
       threads: threadPreview ?? null,
       topFrame: toCompactFrame(topFrame),
       probeNote: probeNote ?? null,
@@ -1153,15 +1235,14 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
     const includeTopFrame = Boolean(input.includeTopFrame);
     let isException = stopKind === "exception";
 
-    // stopState can become stale if the adapter doesn't emit a reliable continued event,
-    // so we confirm pause state via a bounded live stack probe.
-    const likelyPaused = stopState !== undefined;
+    // stopState can be missing or stale on some adapters, so always probe pause state
+    // via a bounded live stack request before classifying exception state.
 
     let rawTopFrame: Record<string, unknown> | null = null;
     let topFrame: JsonObject | null = null;
     let paused = false;
     let resolvedThreadId: number | undefined;
-    if (likelyPaused || includeTopFrame) {
+    {
       try {
         const preferredThreadId = typeof input.threadId === "number"
           ? input.threadId
@@ -1221,36 +1302,33 @@ export class DebugGetExceptionInfoTool implements vscode.LanguageModelTool<Debug
       }
     }
 
-    if (!paused) {
-      isException = false;
-    }
+    const normalized = normalizeStopSemantics({
+      paused,
+      stopKind,
+      isException,
+      exception,
+      topFrame: rawTopFrame
+    });
 
-    if (!isException) {
-      // Keep payload clean on non-exception stops so breakpoint/step results are not noisy.
-      exception = {
-        ...exception,
-        isException: false,
+    if (!normalized.isException) {
+      normalized.exception = {
+        ...normalized.exception,
         message: null,
-        reason: paused ? (stopState?.reason ?? null) : null,
         description: null,
         text: null
       };
     }
 
-    const normalizedStopKind = stopKind
-      ?? (paused
-        ? (isLikelyBreakpointStop(rawTopFrame) ? "breakpoint" : "other")
-        : null);
     const basePayload: JsonObject = {
       session: toDebugSessionSummary(session),
-      stopKind: normalizedStopKind,
-      isException,
-      paused,
+      stopKind: normalized.stopKind,
+      isException: normalized.isException,
+      paused: normalized.paused,
       adapterExceptionQuery,
       adapterException
     };
-    if (isException) {
-      basePayload.exception = exception;
+    if (normalized.isException) {
+      basePayload.exception = normalized.exception;
     }
 
     if (!includeTopFrame) {
