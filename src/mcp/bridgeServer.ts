@@ -768,12 +768,24 @@ export class LmToolsMcpBridgeServer implements vscode.Disposable {
         };
       }
 
+      // Strip routing-only parameters (e.g. workspacePath) that were consumed by the proxy
+      // for routing but are not declared in the target tool's input schema.
+      const schemaProperties = (info.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
+      let toolInput = invokeTarget.targetInput;
+      const ROUTING_PARAMS = ["workspacePath"] as const;
+      for (const param of ROUTING_PARAMS) {
+        if (param in toolInput && !(schemaProperties && param in schemaProperties)) {
+          const { [param]: _stripped, ...rest } = toolInput;
+          toolInput = rest;
+        }
+      }
+
       try {
         const result = await vscode.lm.invokeTool(
           invokeTarget.targetName,
           {
             toolInvocationToken: undefined,
-            input: invokeTarget.targetInput
+            input: toolInput
           }
         );
         return toToolResultContent(result);

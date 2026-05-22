@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.9
+
+- 修复多工作区路由参数透传问题：bridge server 在调用工具前会过滤掉工具 schema 中未声明的路由参数（如 `workspacePath`），避免 `activeEditorSummary`/`hoverTopVisible` 等无参工具因收到多余字段而报错。 / Fixed routing-parameter leakage in multi-workspace mode: the bridge server now strips routing-only parameters (e.g. `workspacePath`) that are not declared in the target tool's input schema, preventing spurious "unsupported fields" errors on no-parameter tools such as `activeEditorSummary` and `hoverTopVisible`.
+
 ## 1.2.8
 
 - 统一调试状态语义：为 `stopKind/isException/paused/exception` 增加共享归一化逻辑，避免字段组合互相矛盾。 / Unified debug-state semantics: added shared normalization for `stopKind/isException/paused/exception` to prevent contradictory field combinations.
