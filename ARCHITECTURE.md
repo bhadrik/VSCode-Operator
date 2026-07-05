@@ -158,8 +158,10 @@ Settings:
 
 - `vscodeOperator.mcpBridge.enabled`
 - `vscodeOperator.mcpBridge.host`
+- `vscodeOperator.mcpBridge.allowRemoteConnections`
 - `vscodeOperator.mcpBridge.port`
 - `vscodeOperator.mcpBridge.path`
+- `vscodeOperator.mcpBridge.logPayloadPreview`
 - `vscodeOperator.externalMcp.enabled`
 - `vscodeOperator.externalMcp.policyFile`
 - `vscodeOperator.externalMcp.commandMode`
@@ -178,6 +180,8 @@ Commands:
 - `vscodeOperator.externalMcp.removeProtectionFromSelectedExplorerItem`
 - `vscodeOperator.externalMcp.showAccessStatus`
 - `vscodeOperator.externalMcp.setCommandMode`
+
+`vscodeOperator.mcpBridge.logPayloadPreview` defaults to `false` so local Output logs include routing metadata and byte counts without copying MCP request arguments or tool response bodies. Non-loopback binding requires `vscodeOperator.mcpBridge.allowRemoteConnections` to be enabled as a User-level setting; workspace settings cannot enable remote binding or payload preview logging by themselves.
 
 ## Development
 

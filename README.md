@@ -158,6 +158,8 @@ VSCode Operator uses a **proxy + bridge architecture** to support multiple VS Co
 - **Commands**: `VSCode Operator: Show MCP Bridge Status`, `VSCode Operator: Restart MCP Bridge`
 - **Settings**: `vscodeOperator.mcpBridge.*`, `vscodeOperator.externalMcp.*`
 
+For confidential workspaces, keep `vscodeOperator.mcpBridge.host` on `127.0.0.1`, keep `vscodeOperator.mcpBridge.allowRemoteConnections` disabled, and leave `vscodeOperator.mcpBridge.logPayloadPreview` disabled. Payload preview logging is off by default so MCP request arguments and tool response bodies are not copied into the VS Code Output channel. Non-loopback binding and payload preview logging require explicit User-level settings; workspace settings cannot enable them by themselves.
+
 ### Multi-Workspace Usage
 
 When multiple VS Code instances are running:

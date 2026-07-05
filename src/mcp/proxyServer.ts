@@ -31,10 +31,22 @@ export class McpProxyServer implements vscode.Disposable {
     return normalized.length > max ? `${normalized.slice(0, max)} ...[truncated ${normalized.length - max} chars]` : normalized;
   }
 
+  private shouldLogPayloadPreview(): boolean {
+    return vscode.workspace
+      .getConfiguration("vscodeOperator.mcpBridge")
+      .inspect<boolean>("logPayloadPreview")
+      ?.globalValue === true;
+  }
+
   private safePreviewJsonBody(body: string): string {
     if (!body.trim()) {
       return "<empty>";
     }
+
+    if (!this.shouldLogPayloadPreview()) {
+      return this.safeRedactedJsonBody(body);
+    }
+
     try {
       const parsed = JSON.parse(body) as Record<string, unknown>;
       const preview = {
@@ -46,6 +58,28 @@ export class McpProxyServer implements vscode.Disposable {
       return this.summarizeText(JSON.stringify(preview));
     } catch {
       return this.summarizeText(body);
+    }
+  }
+
+  private safeRedactedJsonBody(body: string): string {
+    try {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      const params = parsed.params as Record<string, unknown> | undefined;
+      const argumentsValue = params?.arguments;
+      const argumentKeys = argumentsValue && typeof argumentsValue === "object" && !Array.isArray(argumentsValue)
+        ? Object.keys(argumentsValue as Record<string, unknown>).sort()
+        : [];
+      const preview = {
+        jsonrpc: parsed.jsonrpc,
+        id: parsed.id,
+        method: parsed.method,
+        tool: typeof params?.name === "string" ? params.name : undefined,
+        argumentKeys: argumentKeys.length > 0 ? argumentKeys : undefined,
+        redacted: true
+      };
+      return this.summarizeText(JSON.stringify(preview));
+    } catch {
+      return "<redacted invalid-json payload>";
     }
   }
 
@@ -413,19 +447,23 @@ export class McpProxyServer implements vscode.Disposable {
           this.sessions.set(newSessionId, bridge);
           this.appendLine(`[${requestId}] Session established: ${newSessionId} -> ${bridge.workspacePath}`);
         }
+        const includeResponsePreview = this.shouldLogPayloadPreview();
         let responsePreview = "";
         let responseBytes = 0;
         proxyRes.on("data", (chunk: Buffer | string) => {
           const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
           responseBytes += Buffer.byteLength(text);
-          if (responsePreview.length < 1200) {
+          if (includeResponsePreview && responsePreview.length < 1200) {
             responsePreview += text.slice(0, 1200 - responsePreview.length);
           }
         });
         proxyRes.on("end", () => {
           const contentType = String(proxyRes.headers["content-type"] ?? "");
+          const bodySummary = includeResponsePreview
+            ? ` body=${this.summarizeText(responsePreview || "<stream/no-preview>")}`
+            : " body=<redacted>";
           this.appendLine(
-            `[${requestId}] Response <- status=${proxyRes.statusCode ?? 200} contentType=${contentType || "<unknown>"} bytes=${responseBytes} body=${this.summarizeText(responsePreview || "<stream/no-preview>")}`
+            `[${requestId}] Response <- status=${proxyRes.statusCode ?? 200} contentType=${contentType || "<unknown>"} bytes=${responseBytes}${bodySummary}`
           );
         });
         res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);

@@ -11,4 +11,7 @@ tsconfig.json
 package-lock.json
 FULL_WORKSPACE_CONTROL_AND_PROTECTED_PATHS.md
 dist/test/**
+dist/mcp/externalToolCatalog.*
+dist/mcp/externalToolRegistry.*
+dist/mcp/workspacePathPolicy.*
 vscode-operator-*.vsix

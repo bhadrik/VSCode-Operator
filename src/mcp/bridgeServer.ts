@@ -230,6 +230,20 @@ type BridgeConfig = {
   path: string;
 };
 
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "localhost"
+    || normalized === "::1"
+    || normalized === "[::1]"
+    || normalized === "127.0.0.1"
+    || normalized.startsWith("127.");
+}
+
+function getGlobalBooleanSetting(section: string, key: string, defaultValue: boolean): boolean {
+  const inspected = vscode.workspace.getConfiguration(section).inspect<boolean>(key);
+  return inspected?.globalValue ?? defaultValue;
+}
+
 function normalizePath(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -241,9 +255,15 @@ function normalizePath(value: string): string {
 
 function getConfig(): BridgeConfig {
   const config = vscode.workspace.getConfiguration("vscodeOperator.mcpBridge");
+  const configuredHost = config.get<string>("host", "127.0.0.1").trim() || "127.0.0.1";
+  const allowRemoteConnections = getGlobalBooleanSetting("vscodeOperator.mcpBridge", "allowRemoteConnections", false);
+  const host = isLoopbackHost(configuredHost) || allowRemoteConnections
+    ? configuredHost
+    : "127.0.0.1";
+
   return {
     enabled: config.get<boolean>("enabled", true),
-    host: config.get<string>("host", "127.0.0.1"),
+    host,
     port: config.get<number>("port", 19191),
     path: normalizePath(config.get<string>("path", "/mcp"))
   };

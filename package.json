@@ -76,7 +76,13 @@
         "vscodeOperator.mcpBridge.host": {
           "type": "string",
           "default": "127.0.0.1",
-          "description": "Host interface for the local MCP bridge. Keep this on 127.0.0.1 unless you intentionally want remote access."
+          "description": "Host interface for the local MCP bridge. Non-loopback values are ignored unless vscodeOperator.mcpBridge.allowRemoteConnections is enabled in User settings."
+        },
+        "vscodeOperator.mcpBridge.allowRemoteConnections": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Allow the MCP bridge to bind to a non-loopback host. Only the User-level value is honored; workspace settings cannot enable this."
         },
         "vscodeOperator.mcpBridge.port": {
           "type": "number",
@@ -88,6 +94,12 @@
           "type": "string",
           "default": "/mcp",
           "description": "HTTP path for the MCP endpoint exposed by the local bridge."
+        },
+        "vscodeOperator.mcpBridge.logPayloadPreview": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Log MCP request arguments and response body previews to the VS Code Output channel. Only the User-level value is honored; workspace settings cannot enable this. Keep disabled for confidential workspaces."
         },
         "vscodeOperator.externalMcp.enabled": {
           "type": "boolean",
@@ -783,7 +795,6 @@
     "@types/vscode": "^1.105.0",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
     "@typescript-eslint/parser": "^8.57.0",
-    "esbuild": "^0.27.3",
     "eslint": "^10.0.3",
     "typescript": "^5.9.3"
   },
