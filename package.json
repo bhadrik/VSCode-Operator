@@ -3,13 +3,13 @@
   "displayName": "VSCode Operator",
   "version": "1.2.9",
   "publisher": "sumneko",
-  "description": "AI that operates VS Code like a real developer through Language Model Tools and a local MCP bridge.",
+  "description": "AI that operates VS Code like a real developer through Language Model Tools and a supported local MCP bridge.",
   "main": "./dist/extension.js",
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext .ts",
-    "test": "echo \"No tests configured yet\""
+    "test": "npm run compile && node --test dist/test/mcp/accessPolicy.test.js dist/test/mcp/catalog.test.js dist/test/mcp/pathGuard.test.js dist/test/mcp/workspaceTools.test.js"
   },
   "engines": {
     "vscode": "^1.105.0"
@@ -29,15 +29,49 @@
       {
         "command": "vscodeOperator.mcpBridge.restart",
         "title": "VSCode Operator: Restart MCP Bridge"
+      },
+      {
+        "command": "vscodeOperator.externalMcp.openAccessPolicy",
+        "title": "VSCode Operator: Open External MCP Access Policy"
+      },
+      {
+        "command": "vscodeOperator.externalMcp.protectSelectedExplorerItem",
+        "title": "VSCode Operator: Protect from External MCP"
+      },
+      {
+        "command": "vscodeOperator.externalMcp.removeProtectionFromSelectedExplorerItem",
+        "title": "VSCode Operator: Remove External MCP Protection"
+      },
+      {
+        "command": "vscodeOperator.externalMcp.showAccessStatus",
+        "title": "VSCode Operator: Show External MCP Access Status"
+      },
+      {
+        "command": "vscodeOperator.externalMcp.setCommandMode",
+        "title": "VSCode Operator: Set External MCP Command Mode"
       }
     ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "vscodeOperator.externalMcp.protectSelectedExplorerItem",
+          "when": "resourceScheme == file",
+          "group": "vscodeOperator@1"
+        },
+        {
+          "command": "vscodeOperator.externalMcp.removeProtectionFromSelectedExplorerItem",
+          "when": "resourceScheme == file",
+          "group": "vscodeOperator@2"
+        }
+      ]
+    },
     "configuration": {
       "title": "VSCode Operator",
       "properties": {
         "vscodeOperator.mcpBridge.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable the local MCP bridge that exposes VS Code language model tools to external MCP clients."
+          "description": "Enable the local MCP bridge that exposes supported policy-enforced external MCP tools."
         },
         "vscodeOperator.mcpBridge.host": {
           "type": "string",
@@ -54,6 +88,55 @@
           "type": "string",
           "default": "/mcp",
           "description": "HTTP path for the MCP endpoint exposed by the local bridge."
+        },
+        "vscodeOperator.externalMcp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the explicit policy-enforced external MCP tool catalog. Internal VS Code Language Model Tools are unaffected."
+        },
+        "vscodeOperator.externalMcp.policyFile": {
+          "type": "string",
+          "default": ".vscode/vscode-operator.access.json",
+          "description": "Workspace-relative access policy file for protected external MCP paths. Invalid or unsafe values fall back to the default."
+        },
+        "vscodeOperator.externalMcp.commandMode": {
+          "type": "string",
+          "default": "sandboxed",
+          "enum": [
+            "off",
+            "sandboxed",
+            "trusted"
+          ],
+          "description": "External MCP command mode. Command tools are not exposed in this read-only milestone."
+        },
+        "vscodeOperator.externalMcp.requireWorkspaceTrust": {
+          "type": "boolean",
+          "default": true,
+          "description": "Require VS Code workspace trust before future external MCP write, command, task, Git mutation, or debug-launch tools are exposed."
+        },
+        "vscodeOperator.externalMcp.maxReadBytes": {
+          "type": "number",
+          "default": 5242880,
+          "minimum": 1,
+          "description": "Maximum bytes returned by external MCP file reads, subject to a hard internal cap."
+        },
+        "vscodeOperator.externalMcp.maxSearchResults": {
+          "type": "number",
+          "default": 500,
+          "minimum": 1,
+          "description": "Maximum results returned by external MCP text search, subject to a hard internal cap."
+        },
+        "vscodeOperator.externalMcp.maxCommandOutputBytes": {
+          "type": "number",
+          "default": 1048576,
+          "minimum": 1,
+          "description": "Reserved limit for future sandboxed external MCP command output."
+        },
+        "vscodeOperator.externalMcp.maxCommandRuntimeMs": {
+          "type": "number",
+          "default": 60000,
+          "minimum": 1,
+          "description": "Reserved runtime limit for future sandboxed external MCP commands."
         }
       }
     },

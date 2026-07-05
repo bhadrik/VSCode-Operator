@@ -17,6 +17,15 @@ import {
   type Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import * as vscode from "vscode";
+import {
+  buildExternalToolCatalog,
+  getUnsupportedExternalLmToolMessage,
+  isKnownUnsupportedExternalLmTool,
+  isLmToolExternallyProxyable,
+  sanitizeExternalLmToolInput,
+  sanitizeExternalLmToolSchema
+} from "./external/externalToolCatalog.js";
+import { getNativeExternalTools, invokeNativeExternalTool } from "./external/externalToolRegistry.js";
 
 const DEFAULT_INPUT_SCHEMA = {
   type: "object",
@@ -36,12 +45,11 @@ const SERVER_INSTRUCTIONS = [
   "If tools/list is unavailable in the client workflow, read resource vscode-operator://tools and vscode-operator://usage.",
   "Do not guess tool names. Use exact names returned by tools/list.",
   "Do not guess parameter names. Follow each tool's inputSchema exactly.",
-  "Use dedicated tools for editor context: vscodeOperator_activeEditorSummary, vscodeOperator_hoverTopVisible, vscodeOperator_hoverAtPosition, and vscodeOperator_completionAt.",
-  "When fixing code, prefer reading diagnostics via vscodeOperator_readProblems first.",
-  "For debugger workflows, prefer vscodeOperator_debugSnapshot first to avoid guessing DAP ids (threadId/frameId/variablesReference).",
-  "Use vscodeOperator_debugSnapshot for stack/frame/scope context only; do not use it to decide whether the stop is an exception.",
-  "To determine whether the current stop is an exception, call vscodeOperator_debugGetExceptionInfo.",
-  "Before starting a new debug session, stop stale sessions first; treat stop-before-start as the default safe policy unless explicit reuse is requested."
+  "For workspace access, use native external MCP tools: vscode_workspace_status, vscode_workspace_list_files, vscode_workspace_stat, vscode_workspace_read_file, and vscode_workspace_search_text.",
+  "When fixing code, prefer reading diagnostics via vscode_workspace_read_problems first.",
+  "External MCP only exposes supported native tools and a reviewed allowlist of token-free VS Code LM tools.",
+  "Terminal/process execution, generic VS Code commands, and mutating debug controls are intentionally unavailable through this external bridge.",
+  "Protected paths are hidden from list/search/status outputs and blocked from read/stat/symbol/diagnostic tools."
 ].join(" ");
 
 const USAGE_GUIDE_TEXT = [
@@ -50,40 +58,35 @@ const USAGE_GUIDE_TEXT = [
   "2) If list output is truncated, read vscode-operator://tools for compact name+description list.",
   "3) Query parameter schema using vscode-operator://tool-schema?name=<toolName>.",
   "4) Prefer tool calls over guessing API names or editor state.",
-  "5) For diagnostics/fixes, call vscodeOperator_readProblems first.",
-  "6) For editor summary, call vscodeOperator_activeEditorSummary.",
-  "7) For hover/type info, call vscodeOperator_hoverTopVisible or vscodeOperator_hoverAtPosition.",
-  "8) For completion discovery, call vscodeOperator_completionAt.",
-  "9) Use vscodeOperator_executeCommand only when no specialized tool fits.",
-  "10) For generic MCP calls (initialize/tools/list/resources/list), workspacePath is optional.",
-  "11) For workspace-specific requests in multi-workspace mode, include workspacePath in tool arguments or in resource URI query (e.g. vscode-operator://tools?workspacePath=<abs path>).",
-  "12) For debugging, prefer vscodeOperator_debugSnapshot first to minimize roundtrips and obtain frame/variable context.",
-  "12.1) Do not use debugSnapshot to determine whether the current stop is an exception.",
-  "12.2) For exception-stop detection and stable exception fields, use vscodeOperator_debugGetExceptionInfo (optionally includeTopFrame=true).",
-  "12.3) If payload size matters, set compact=true on debugSnapshot/debugStatus.",
-  "13) If you need low-level debug calls, do not guess ids: threadId <- debugGetThreads, frameId <- debugGetTopFrame/debugGetStackTrace, variablesReference <- debugGetScopes.",
-  "14) If debugSnapshot/debugGetTopFrame returns no frame, pause first using debugControl(action='pause') or run to a breakpoint.",
-  "15) Before calling debugStart for a new run, stop old sessions first using debugControl(action='stop') unless explicit session reuse is required.",
+  "5) For workspace status and policy state, call vscode_workspace_status.",
+  "6) For workspace file discovery, call vscode_workspace_list_files.",
+  "7) For workspace file content, call vscode_workspace_read_file.",
+  "8) For workspace text search, call vscode_workspace_search_text.",
+  "9) For diagnostics/fixes, call vscode_workspace_read_problems first.",
+  "10) For open document discovery, call vscode_editor_list_open_documents.",
+  "11) External MCP does not expose vscodeOperator_executeCommand, terminal/process execution, debugStart, breakpoint mutation, debugControl, or debugEvaluate.",
+  "12) For generic MCP calls (initialize/tools/list/resources/list), workspacePath is optional.",
+  "13) For workspace-specific requests in multi-workspace mode, include workspacePath in tool arguments or in resource URI query (e.g. vscode-operator://tools?workspacePath=<abs path>).",
   "",
   "Parameter hints:",
-  "- vscodeOperator_hoverAtPosition: line, column",
-  "- vscodeOperator_completionAt: line, column, triggerCharacter(optional), filePath(optional)",
-  "- vscodeOperator_debugGetScopes: frameId (from debugGetTopFrame/debugGetStackTrace)",
-  "- vscodeOperator_debugGetVariables: variablesReference (from debugGetScopes)",
-  "- vscodeOperator_debugEvaluate: expression; optional frameId",
+  "- vscode_workspace_read_file: path, workspacePath(optional), maxBytes(optional)",
+  "- vscode_workspace_search_text: query, include(optional), exclude(optional), caseSensitive(optional), maxResults(optional)",
+  "- vscode_workspace_stat: path, workspacePath(optional)",
+  "- vscode_workspace_get_symbols: path, workspacePath(optional)",
   "- Position is 1-based.",
   "",
   "Examples:",
-  "- vscodeOperator_completionAt:",
-  "  {\"line\":1,\"column\":4,\"triggerCharacter\":\".\"}",
-  "- vscodeOperator_hoverAtPosition:",
-  "  {\"line\":42,\"column\":18}"
+  "- vscode_workspace_read_file:",
+  "  {\"path\":\"src/extension.ts\"}",
+  "- vscode_workspace_search_text:",
+  "  {\"query\":\"activate\",\"include\":\"src/**/*.ts\"}"
 ].join("\n");
 
 type AliasDefinition = {
   name: string;
   description: string;
   inputSchema: Tool["inputSchema"];
+  targetName: string;
   toInvokeInput: (input: unknown) => { targetName: string; targetInput: Record<string, unknown> };
 };
 
@@ -91,6 +94,7 @@ const ALIAS_DEFINITIONS: AliasDefinition[] = [
   {
     name: "get_problems",
     description: "Compatibility alias of vscodeOperator_readProblems. Reads diagnostics from VS Code Problems panel.",
+    targetName: "vscodeOperator_readProblems",
     inputSchema: {
       type: "object",
       properties: {
@@ -124,6 +128,7 @@ const ALIAS_DEFINITIONS: AliasDefinition[] = [
   {
     name: "get_diagnostics",
     description: "Compatibility alias of vscodeOperator_readProblems. Reads diagnostics from VS Code Problems panel.",
+    targetName: "vscodeOperator_readProblems",
     inputSchema: {
       type: "object",
       properties: {
@@ -157,6 +162,7 @@ const ALIAS_DEFINITIONS: AliasDefinition[] = [
   {
     name: "hover",
     description: "Compatibility alias of vscodeOperator_hoverAtPosition.",
+    targetName: "vscodeOperator_hoverAtPosition",
     inputSchema: {
       type: "object",
       properties: {
@@ -186,6 +192,7 @@ const ALIAS_DEFINITIONS: AliasDefinition[] = [
   {
     name: "get_hover_info",
     description: "Compatibility alias of vscodeOperator_hoverAtPosition.",
+    targetName: "vscodeOperator_hoverAtPosition",
     inputSchema: {
       type: "object",
       properties: {
@@ -246,7 +253,10 @@ function toMcpTool(info: vscode.LanguageModelToolInformation): Tool {
   return {
     name: info.name,
     description: info.description,
-    inputSchema: (info.inputSchema as Tool["inputSchema"]) ?? DEFAULT_INPUT_SCHEMA,
+    inputSchema: sanitizeExternalLmToolSchema(
+      info.name,
+      (info.inputSchema as Tool["inputSchema"]) ?? DEFAULT_INPUT_SCHEMA
+    ),
     _meta: info.tags.length > 0
       ? { "vscodeOperator/vscodeTags": [...info.tags] }
       : undefined
@@ -265,12 +275,16 @@ function toAliasTool(alias: AliasDefinition): Tool {
 }
 
 function getExposedTools(): Tool[] {
-  const nativeTools = [...vscode.lm.tools]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(toMcpTool);
+  const lmTools = [...vscode.lm.tools]
+    .sort((a, b) => a.name.localeCompare(b.name));
 
-  const aliasTools = ALIAS_DEFINITIONS.map(toAliasTool);
-  return [...nativeTools, ...aliasTools];
+  return buildExternalToolCatalog(
+    getNativeExternalTools(),
+    lmTools,
+    ALIAS_DEFINITIONS,
+    toMcpTool,
+    toAliasTool
+  );
 }
 
 function getToolSummaryList(): Array<{ name: string; description: string }> {
@@ -747,23 +761,51 @@ export class LmToolsMcpBridgeServer implements vscode.Disposable {
     server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
       const toolName = request.params.name;
       const input = request.params.arguments;
-      const alias = ALIAS_BY_NAME.get(toolName);
-      const invokeTarget = alias ? alias.toInvokeInput(input) : {
-        targetName: toolName,
-        targetInput: (input as Record<string, unknown> | undefined) ?? {}
-      };
-      const info = vscode.lm.tools.find((tool) => tool.name === invokeTarget.targetName);
 
-      if (!info) {
+      if (input !== undefined && (typeof input !== "object" || input === null || Array.isArray(input))) {
         return {
-          content: [{ type: "text", text: `VS Code tool not found: ${invokeTarget.targetName}` }],
+          content: [{ type: "text", text: "Tool arguments must be a JSON object." }],
           isError: true
         };
       }
 
-      if (invokeTarget.targetInput !== undefined && (typeof invokeTarget.targetInput !== "object" || invokeTarget.targetInput === null || Array.isArray(invokeTarget.targetInput))) {
+      const inputObject = (input as Record<string, unknown> | undefined) ?? {};
+      const nativeResult = await invokeNativeExternalTool(toolName, inputObject);
+      if (nativeResult) {
+        return nativeResult;
+      }
+
+      const alias = ALIAS_BY_NAME.get(toolName);
+      if (alias && !isLmToolExternallyProxyable(alias.targetName)) {
         return {
-          content: [{ type: "text", text: "Tool arguments must be a JSON object." }],
+          content: [{ type: "text", text: getUnsupportedExternalLmToolMessage(alias.targetName) }],
+          isError: true
+        };
+      }
+
+      const invokeTarget = alias ? alias.toInvokeInput(inputObject) : {
+        targetName: toolName,
+        targetInput: inputObject
+      };
+      const info = vscode.lm.tools.find((tool) => tool.name === invokeTarget.targetName);
+
+      if (!isLmToolExternallyProxyable(invokeTarget.targetName)) {
+        if (!alias && !info && !isKnownUnsupportedExternalLmTool(invokeTarget.targetName)) {
+          return {
+            content: [{ type: "text", text: `External MCP tool not found: ${toolName}` }],
+            isError: true
+          };
+        }
+
+        return {
+          content: [{ type: "text", text: getUnsupportedExternalLmToolMessage(invokeTarget.targetName) }],
+          isError: true
+        };
+      }
+
+      if (!info) {
+        return {
+          content: [{ type: "text", text: `External MCP tool not found: ${toolName}` }],
           isError: true
         };
       }
@@ -775,10 +817,12 @@ export class LmToolsMcpBridgeServer implements vscode.Disposable {
       const ROUTING_PARAMS = ["workspacePath"] as const;
       for (const param of ROUTING_PARAMS) {
         if (param in toolInput && !(schemaProperties && param in schemaProperties)) {
-          const { [param]: _stripped, ...rest } = toolInput;
+          const rest = { ...toolInput };
+          delete rest[param];
           toolInput = rest;
         }
       }
+      toolInput = sanitizeExternalLmToolInput(invokeTarget.targetName, toolInput);
 
       try {
         const result = await vscode.lm.invokeTool(

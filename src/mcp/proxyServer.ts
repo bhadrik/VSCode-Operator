@@ -1,6 +1,5 @@
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node:http";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 import * as vscode from "vscode";
 

@@ -22,10 +22,13 @@ import {
 } from "./features";
 import { LmToolsMcpBridgeServer } from "./mcp/bridgeServer";
 import { McpProxyServer } from "./mcp/proxyServer";
+import { registerAccessPolicyCommands } from "./ui/accessPolicyCommands.js";
 
 export function activate(context: vscode.ExtensionContext): void {
   const mcpProxy = new McpProxyServer();
   const mcpBridge = new LmToolsMcpBridgeServer();
+
+  registerAccessPolicyCommands(context);
 
   context.subscriptions.push(
     mcpProxy,

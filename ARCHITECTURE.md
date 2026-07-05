@@ -9,7 +9,7 @@ VSCode Operator is a VS Code extension that exposes editor and debugger capabili
 The extension also hosts a local MCP server stack in-process:
 
 - `McpProxyServer` routes requests across workspaces
-- `LmToolsMcpBridgeServer` exposes current `vscode.lm.tools`
+- `LmToolsMcpBridgeServer` exposes a supported external MCP catalog of policy-enforced read-only workspace tools plus reviewed token-free LM proxy tools
 
 This is not a sidecar process. All tool execution stays in the Extension Host so tools can read live VS Code state.
 
@@ -26,6 +26,13 @@ src/
    mcp/
       proxyServer.ts        # fixed-port proxy (19191 by default)
       bridgeServer.ts       # workspace-local MCP bridge (port+1, port+2...)
+      external/             # explicit external MCP catalog and native handlers
+   security/
+      accessPolicy.ts       # protected-path policy loading/evaluation
+      pathGuard.ts          # operation/path authorization
+      workspaceResolver.ts  # workspace root resolution and canonical helpers
+   ui/
+      accessPolicyCommands.ts # local policy commands and Explorer actions
 package.json              # contributes.languageModelTools + config/commands
 README.md                 # user-facing docs
 ```
@@ -126,7 +133,18 @@ Recommended session lifecycle:
 - Each VS Code window starts a bridge on an auto-selected port (`port+1` and up)
 - Registers itself to proxy through a persistent SSE channel
 - Exposes MCP at configured path (default `/mcp`)
-- Converts VS Code tool results into MCP response content
+- Exposes native external MCP tools before any reviewed VS Code LM proxy tools
+- The reviewed LM allowlist includes only token-free read/inspection tools and excludes terminal/process execution, generic command execution, debug launch/control, breakpoint mutation, and expression evaluation
+
+### External MCP tool contract
+
+- Native external tools are read-only workspace operations: status, list, stat, read, text search, diagnostics, open-document listing, and symbols.
+- Native workspace tools validate `workspacePath` against open workspace folders, reject path traversal and symlink escapes, enforce output/size limits, and apply `.vscode/vscode-operator.access.json`.
+- Denied paths are hidden from listing/search/status outputs and blocked from read/stat/symbol/diagnostic tools.
+- Read-only policy paths permit read-like operations and reject future mutation tools.
+- The LM proxy only advertises and invokes explicitly allowlisted token-free tools.
+- Token-gated or high-risk LM tools such as `vscodeOperator_executeCommand`, debug start/control/breakpoint mutation, and debug expression evaluation are intentionally unavailable to external MCP clients.
+- External `vscodeOperator_debugSnapshot` removes expression-evaluation inputs from both the advertised schema and the invocation payload.
 
 ### Why HTTP bridge
 
@@ -142,11 +160,24 @@ Settings:
 - `vscodeOperator.mcpBridge.host`
 - `vscodeOperator.mcpBridge.port`
 - `vscodeOperator.mcpBridge.path`
+- `vscodeOperator.externalMcp.enabled`
+- `vscodeOperator.externalMcp.policyFile`
+- `vscodeOperator.externalMcp.commandMode`
+- `vscodeOperator.externalMcp.requireWorkspaceTrust`
+- `vscodeOperator.externalMcp.maxReadBytes`
+- `vscodeOperator.externalMcp.maxSearchResults`
+- `vscodeOperator.externalMcp.maxCommandOutputBytes`
+- `vscodeOperator.externalMcp.maxCommandRuntimeMs`
 
 Commands:
 
 - `vscodeOperator.mcpBridge.showStatus`
 - `vscodeOperator.mcpBridge.restart`
+- `vscodeOperator.externalMcp.openAccessPolicy`
+- `vscodeOperator.externalMcp.protectSelectedExplorerItem`
+- `vscodeOperator.externalMcp.removeProtectionFromSelectedExplorerItem`
+- `vscodeOperator.externalMcp.showAccessStatus`
+- `vscodeOperator.externalMcp.setCommandMode`
 
 ## Development
 
@@ -166,3 +197,5 @@ npm run watch
 - `MarkdownString` hover content does not stringify directly; extract text explicitly
 - JSON schema arrays in tool definitions must include `items`
 - Use schema constants for MCP SDK v1 request handlers
+- External MCP discovery and execution must agree; do not advertise LM tools unless they are verified as safe without a VS Code invocation token
+- Do not add external write, Git mutation, debug launch/control, or command tools unless they call the shared path guard and respect protected paths end to end

@@ -6,6 +6,9 @@ src/**
 .git/**
 .gitignore
 .eslintrc.cjs
+eslint.config.cjs
 tsconfig.json
 package-lock.json
+FULL_WORKSPACE_CONTROL_AND_PROTECTED_PATHS.md
+dist/test/**
 vscode-operator-*.vsix

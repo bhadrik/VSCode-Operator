@@ -2,12 +2,12 @@
 
 A TypeScript VS Code extension that exposes native editor context as Language Model Tools, enabling Copilot Agent to autonomously operate VS Code (read diagnostics, query hover/LSP info, execute commands).
 
-It also starts a local MCP bridge inside the Extension Host so external MCP clients can discover and call the currently registered VS Code language model tools.
+It also starts a local MCP bridge inside the Extension Host so external MCP clients can discover and call a supported external catalog of policy-enforced, read-only workspace tools plus a reviewed allowlist of token-free VS Code LM tools.
 
 ## Simple Intro (For Marketplace)
 
 VSCode Operator connects AI assistants to real VS Code context.
-It exposes diagnostics, hover/completion capabilities, command execution, and debugger control/introspection as tools, and provides a built-in local MCP bridge so external MCP clients can discover and call the same toolset in your live editor session.
+It exposes diagnostics, hover/completion capabilities, command execution, and debugger control/introspection as VS Code Language Model Tools, and provides a built-in local MCP bridge for protected external read-only access to your live editor session.
 
 > **For detailed architecture and design decisions, see [ARCHITECTURE.md](ARCHITECTURE.md).**
 
@@ -23,6 +23,45 @@ It exposes diagnostics, hover/completion capabilities, command execution, and de
 | `vscodeOperator_hoverAtPosition` | `hoverAtPosition` | Get hover info at a specific line/column |
 | `vscodeOperator_completionAt` | `completionAt` | Get completion candidates at a specific line/column |
 | `vscodeOperator_executeCommand` | `executeCommand` | Execute any VS Code command by ID with automatic URI deserialization |
+
+### Native External MCP Workspace Tools
+
+These tools are exposed through the local MCP bridge for external MCP clients. They do not route through `vscode.lm.invokeTool(...)`, so they do not require a VS Code internal invocation token.
+
+| Tool | Purpose |
+|---|---|
+| `vscode_workspace_status` | Show workspace roots and non-sensitive access-policy status |
+| `vscode_workspace_list_files` | List allowed files and folders under a selected workspace root |
+| `vscode_workspace_stat` | Read metadata for an allowed file or folder |
+| `vscode_workspace_read_file` | Read an allowed file with a size cap |
+| `vscode_workspace_search_text` | Search allowed text files for a literal string with bounded results |
+| `vscode_workspace_read_problems` | Read diagnostics for allowed files only |
+| `vscode_editor_list_open_documents` | List open documents that are allowed by policy |
+| `vscode_workspace_get_symbols` | Read symbols from an allowed file |
+
+External MCP intentionally does not expose terminal/process execution, `vscodeOperator_executeCommand`, debug session start/control/mutation tools, or expression evaluation. Those capabilities remain available only through VS Code's internal Language Model Tool invocation path where VS Code can enforce its own approval and invocation-context checks.
+
+### Allowlisted External MCP LM Tools
+
+The external MCP bridge does not advertise every discovered `vscode.lm.tools` entry. It only proxies reviewed token-free tools such as diagnostics, active-editor summaries, hover/completion, and read-only debug inspection. Token-gated or high-risk tools such as `run_in_terminal`, `vscodeOperator_executeCommand`, `vscodeOperator_debugStart`, `vscodeOperator_debugControl`, and `vscodeOperator_debugEvaluate` are hidden from `tools/list` and return an explicit unsupported-tool error if called directly. For external MCP, `vscodeOperator_debugSnapshot` omits expression-evaluation inputs even though the internal VS Code LM tool supports them.
+
+### Protected Paths
+
+External MCP access is controlled by a workspace-local policy file:
+
+```text
+.vscode/vscode-operator.access.json
+```
+
+The policy file itself is always hidden and blocked from external MCP. Users can edit it directly or use:
+
+- `VSCode Operator: Open External MCP Access Policy`
+- `VSCode Operator: Protect from External MCP`
+- `VSCode Operator: Remove External MCP Protection`
+- `VSCode Operator: Show External MCP Access Status`
+- `VSCode Operator: Set External MCP Command Mode`
+
+Supported policy fields in this milestone are `defaultAccess`, `deny`, `readOnly`, and `commands.mode`. Denied paths are omitted from listing/search results and rejected by read/stat/symbol/diagnostic tools. Read-only paths permit list/stat/read/search and reject future mutation tools.
 
 ### Debugger Tools (AI Can Operate Debugger)
 
@@ -109,7 +148,7 @@ To avoid AI accidentally reusing stale debugger state:
 VSCode Operator uses a **proxy + bridge architecture** to support multiple VS Code workspaces simultaneously:
 
 - **Proxy Server**: Listens on fixed port `19191`, routes MCP requests to appropriate workspace bridges based on `workspacePath` parameter
-- **Bridge Server**: Each VS Code instance runs its own bridge (auto-assigned port 19192+), queries its local tools and registers with the proxy
+- **Bridge Server**: Each VS Code instance runs its own bridge (auto-assigned port 19192+), exposes the supported policy-enforced external MCP catalog, and registers with the proxy
 
 ### Endpoints & Configuration
 
@@ -117,7 +156,7 @@ VSCode Operator uses a **proxy + bridge architecture** to support multiple VS Co
 - **Bridge registers at**: Each bridge auto-discovers an available port and registers with the proxy
 - **Health check**: `http://127.0.0.1:19191/health`
 - **Commands**: `VSCode Operator: Show MCP Bridge Status`, `VSCode Operator: Restart MCP Bridge`
-- **Settings**: `vscodeOperator.mcpBridge.enabled`, `vscodeOperator.mcpBridge.host`, `vscodeOperator.mcpBridge.port`, `vscodeOperator.mcpBridge.path`
+- **Settings**: `vscodeOperator.mcpBridge.*`, `vscodeOperator.externalMcp.*`
 
 ### Multi-Workspace Usage
 
