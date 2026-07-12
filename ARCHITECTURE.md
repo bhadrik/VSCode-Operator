@@ -22,6 +22,10 @@ src/
       commandTool.ts        # editor/context command tools
       problemsTool.ts       # diagnostics tool (severity/path filtering)
       debugTool.ts          # debugger control + inspection tools
+      fileTool.ts           # file read/write/edit/delete/move/save tools
+      processTool.ts        # runCommand/background-process tools + ProcessRegistry
+      processExecution.ts   # pure allowlist/argv/timeout/output-cap helpers (unit tested)
+      toolErrors.ts         # shared access-denied message + markdown escaping
       index.ts              # feature exports
    mcp/
       proxyServer.ts        # fixed-port proxy (19191 by default)
@@ -31,6 +35,7 @@ src/
       accessPolicy.ts       # protected-path policy loading/evaluation
       pathGuard.ts          # operation/path authorization
       workspaceResolver.ts  # workspace root resolution and canonical helpers
+      runtimeConfig.ts      # shared open-workspace-roots + policy-file config lookup
    ui/
       accessPolicyCommands.ts # local policy commands and Explorer actions
 package.json              # contributes.languageModelTools + config/commands
@@ -47,6 +52,29 @@ README.md                 # user-facing docs
 - `vscodeOperator_hoverAtPosition`
 - `vscodeOperator_completionAt`
 - `vscodeOperator_executeCommand`
+
+### File editing tools
+
+- `vscodeOperator_readFile`
+- `vscodeOperator_writeFile`
+- `vscodeOperator_applyTextEdits`
+- `vscodeOperator_deleteFile`
+- `vscodeOperator_createDirectory`
+- `vscodeOperator_movePath`
+- `vscodeOperator_saveDocument`
+- `vscodeOperator_saveAllDocuments`
+
+All go through `requireAuthorizedPath` (`pathGuard.ts`) with the same `.vscode/vscode-operator.access.json` policy the external MCP workspace tools already enforced — this is the first internal-tool caller of the `write`/`create`/`delete`/`rename`/`patch` operation kinds that were declared in `AccessOperation` but previously unused.
+
+### Process execution tools
+
+- `vscodeOperator_runCommand`
+- `vscodeOperator_startBackgroundProcess`
+- `vscodeOperator_readProcessOutput`
+- `vscodeOperator_stopProcess`
+- `vscodeOperator_listProcesses`
+
+Implemented with Node's `child_process.spawn` directly (`shell: false`, argv array — never a shell string). This is the general-purpose mechanism behind Android and Node.js development support: rather than one wrapper tool per `npm`/`gradlew`/`adb`/`git` operation, these five tools let the model run any allowlisted executable and read its result. `executable` must match `vscodeOperator.processTools.allowedExecutables` (basename, extension-insensitive); `cwd` is authorized the same way file paths are, so `commands.mode: "off"` in the access policy disables process execution entirely. Background processes are tracked by a `ProcessRegistry` (`vscode.Disposable`) that force-kills everything still running when the extension deactivates.
 
 ### Debugger tools
 
@@ -203,3 +231,5 @@ npm run watch
 - Use schema constants for MCP SDK v1 request handlers
 - External MCP discovery and execution must agree; do not advertise LM tools unless they are verified as safe without a VS Code invocation token
 - Do not add external write, Git mutation, debug launch/control, or command tools unless they call the shared path guard and respect protected paths end to end
+- `child_process.spawn` resolves a relative `command` against `process.cwd()`, not the `cwd` option passed to `spawn()` — `processExecution.ts`'s `resolveExecutablePath` must stay in the path for any path-like executable (e.g. `./gradlew`) or it will silently look in the wrong directory
+- New internal write/execute tools must be added to `KNOWN_UNSUPPORTED_EXTERNAL_LM_TOOLS` in `externalToolCatalog.ts`; the external bridge allowlist (`EXTERNALLY_PROXYABLE_LM_TOOLS`) is fail-closed by default, but the explicit unsupported-list entry gives external callers a clear error instead of a generic "unknown tool"

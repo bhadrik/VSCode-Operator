@@ -6,8 +6,10 @@ import {
   filterExternalAliases,
   filterExternalLmTools,
   getUnsupportedExternalLmToolMessage,
+  getWorkspaceTrustRequiredMessage,
   isKnownUnsupportedExternalLmTool,
   isLmToolExternallyProxyable,
+  isWriteCapableExternalLmTool,
   sanitizeExternalLmToolInput,
   sanitizeExternalLmToolSchema
 } from "../../mcp/external/externalToolCatalog.js";
@@ -96,6 +98,34 @@ test("known token-gated and mutation tools are explicitly unsupported", () => {
   assert.equal(isKnownUnsupportedExternalLmTool("vscodeOperator_executeCommand"), true);
   assert.equal(isKnownUnsupportedExternalLmTool("vscodeOperator_debugControl"), true);
   assert.equal(isKnownUnsupportedExternalLmTool("vscodeOperator_readProblems"), false);
+});
+
+test("file and process tools are externally proxyable, and mutating ones are write-capable", () => {
+  assert.equal(isLmToolExternallyProxyable("vscodeOperator_readFile"), true);
+  assert.equal(isLmToolExternallyProxyable("vscodeOperator_writeFile"), true);
+  assert.equal(isLmToolExternallyProxyable("vscodeOperator_runCommand"), true);
+
+  assert.equal(isWriteCapableExternalLmTool("vscodeOperator_writeFile"), true);
+  assert.equal(isWriteCapableExternalLmTool("vscodeOperator_deleteFile"), true);
+  assert.equal(isWriteCapableExternalLmTool("vscodeOperator_runCommand"), true);
+  assert.equal(isWriteCapableExternalLmTool("vscodeOperator_startBackgroundProcess"), true);
+  assert.equal(isWriteCapableExternalLmTool("vscodeOperator_stopProcess"), true);
+
+  // Read-only tools stay outside the trust gate.
+  assert.equal(isWriteCapableExternalLmTool("vscodeOperator_readFile"), false);
+  assert.equal(isWriteCapableExternalLmTool("vscodeOperator_readProcessOutput"), false);
+  assert.equal(isWriteCapableExternalLmTool("vscodeOperator_listProcesses"), false);
+
+  // executeCommand/debug launch/control remain categorically unsupported, unaffected by this change.
+  assert.equal(isKnownUnsupportedExternalLmTool("vscodeOperator_executeCommand"), true);
+});
+
+test("workspace trust required message explains the gate and the escape hatch", () => {
+  const message = getWorkspaceTrustRequiredMessage("vscodeOperator_writeFile");
+
+  assert.match(message, /workspace trust/i);
+  assert.match(message, /vscodeOperator_writeFile/);
+  assert.match(message, /requireWorkspaceTrust/);
 });
 
 test("debug snapshot external schema and input do not expose expression evaluation", () => {

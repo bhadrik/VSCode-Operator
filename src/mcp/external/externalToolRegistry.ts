@@ -1,12 +1,14 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as vscode from "vscode";
 import {
-  DEFAULT_POLICY_RELATIVE_PATH,
   getAccessPolicyStatus,
   loadAccessPolicy
 } from "../../security/accessPolicy.js";
 import { externalAccessErrorPayload } from "../../security/pathGuard.js";
-import type { WorkspaceRoot } from "../../security/workspaceResolver.js";
+import {
+  getConfiguredPolicyRelativePath as getPolicyRelativePath,
+  getOpenWorkspaceRoots as getWorkspaceRoots
+} from "../../security/runtimeConfig.js";
 import {
   getWorkspaceSymbols,
   listOpenDocuments,
@@ -342,20 +344,6 @@ export async function getPolicyStatusForRoots(): Promise<Record<string, unknown>
   return statuses;
 }
 
-function getWorkspaceRoots(): WorkspaceRoot[] {
-  return (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
-    name: folder.name,
-    scheme: folder.uri.scheme,
-    fsPath: folder.uri.fsPath
-  }));
-}
-
-function getPolicyRelativePath(): string {
-  return vscode.workspace
-    .getConfiguration("vscodeOperator.externalMcp")
-    .get<string>("policyFile", DEFAULT_POLICY_RELATIVE_PATH);
-}
-
 function isExternalMcpEnabled(): boolean {
   return vscode.workspace
     .getConfiguration("vscodeOperator.externalMcp")
@@ -374,6 +362,12 @@ function getWorkspaceToolLimits(): WorkspaceToolLimits {
     maxReadBytes: config.get<number>("maxReadBytes", 5 * 1024 * 1024),
     maxSearchResults: config.get<number>("maxSearchResults", 500)
   };
+}
+
+export function isWorkspaceTrustRequiredForWriteCapableTools(): boolean {
+  return vscode.workspace
+    .getConfiguration("vscodeOperator.externalMcp")
+    .get<boolean>("requireWorkspaceTrust", true);
 }
 
 async function invokeWithPolicyErrors(operation: () => Promise<Record<string, unknown>>): Promise<CallToolResult> {

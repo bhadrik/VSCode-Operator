@@ -24,6 +24,35 @@ It exposes diagnostics, hover/completion capabilities, command execution, and de
 | `vscodeOperator_completionAt` | `completionAt` | Get completion candidates at a specific line/column |
 | `vscodeOperator_executeCommand` | `executeCommand` | Execute any VS Code command by ID with automatic URI deserialization |
 
+### File Editing Tools
+
+| Tool | Reference name | Purpose |
+|---|---|---|
+| `vscodeOperator_readFile` | `readFile` | Read a file's text (live unsaved buffer if open), optional line range |
+| `vscodeOperator_writeFile` | `writeFile` | Create or overwrite a file's full content |
+| `vscodeOperator_applyTextEdits` | `applyTextEdits` | Apply precise line/column range edits through the editor edit API |
+| `vscodeOperator_deleteFile` | `deleteFile` | Delete a file or directory (trash by default) |
+| `vscodeOperator_createDirectory` | `createDirectory` | Create a directory and missing parents |
+| `vscodeOperator_movePath` | `movePath` | Move or rename a file or directory |
+| `vscodeOperator_saveDocument` | `saveDocument` | Save one open document |
+| `vscodeOperator_saveAllDocuments` | `saveAllDocuments` | Save all open documents |
+
+All file-editing tools are authorized through the same `.vscode/vscode-operator.access.json` policy as the external MCP workspace tools (see [Protected Paths](#protected-paths)): denied paths are rejected outright, and read-only paths reject any write/delete/move. `vscodeOperator_writeFile`, `vscodeOperator_applyTextEdits`, `vscodeOperator_deleteFile`, and `vscodeOperator_movePath` show VS Code's native confirmation dialog before running.
+
+### Process Execution Tools
+
+| Tool | Reference name | Purpose |
+|---|---|---|
+| `vscodeOperator_runCommand` | `runCommand` | Run an allowlisted executable (argument array, no shell) and wait for it to finish |
+| `vscodeOperator_startBackgroundProcess` | `startBackgroundProcess` | Start a long-running process (dev server, `adb logcat`) and return immediately |
+| `vscodeOperator_readProcessOutput` | `readProcessOutput` | Read buffered stdout/stderr from a background process |
+| `vscodeOperator_stopProcess` | `stopProcess` | Stop a background process (SIGTERM, then SIGKILL) |
+| `vscodeOperator_listProcesses` | `listProcesses` | List tracked background processes and their status |
+
+`vscodeOperator_runCommand` and `vscodeOperator_startBackgroundProcess` are the general-purpose mechanism for Android and Node.js development: `npm`/`npx`/`vite`/`yarn`/`pnpm`/`node`/`tsc`/`eslint`, `git`, `adb`, and `gradlew`/`gradlew.bat` (pass `./gradlew` so it resolves against `cwd`). Arguments are always passed as an array and spawned without a shell, so there is no shell-interpolation risk. Only executables listed in `vscodeOperator.processTools.allowedExecutables` (configurable) can be launched, `cwd` is authorized against the same access policy as file tools (`commands.mode: "off"` in the policy file disables process execution entirely), output is capped per `vscodeOperator.processTools.maxOutputBytes`, and foreground commands are force-killed past `timeoutMs`/`vscodeOperator.processTools.maxTimeoutMs`. Background processes are tracked in memory and are always killed when the extension deactivates or reloads — call `vscodeOperator_stopProcess` when you're done with one rather than leaving it running.
+
+All five process tools show VS Code's native confirmation dialog with the exact command line before running, except `readProcessOutput` and `listProcesses`, which are read-only.
+
 ### Native External MCP Workspace Tools
 
 These tools are exposed through the local MCP bridge for external MCP clients. They do not route through `vscode.lm.invokeTool(...)`, so they do not require a VS Code internal invocation token.

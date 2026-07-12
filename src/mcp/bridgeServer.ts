@@ -20,12 +20,24 @@ import * as vscode from "vscode";
 import {
   buildExternalToolCatalog,
   getUnsupportedExternalLmToolMessage,
+  getWorkspaceTrustRequiredMessage,
   isKnownUnsupportedExternalLmTool,
   isLmToolExternallyProxyable,
+  isWriteCapableExternalLmTool,
   sanitizeExternalLmToolInput,
   sanitizeExternalLmToolSchema
 } from "./external/externalToolCatalog.js";
-import { getNativeExternalTools, invokeNativeExternalTool } from "./external/externalToolRegistry.js";
+import {
+  getNativeExternalTools,
+  invokeNativeExternalTool,
+  isWorkspaceTrustRequiredForWriteCapableTools
+} from "./external/externalToolRegistry.js";
+
+function isWriteCapableToolBlockedByTrust(toolName: string): boolean {
+  return isWriteCapableExternalLmTool(toolName)
+    && isWorkspaceTrustRequiredForWriteCapableTools()
+    && !vscode.workspace.isTrusted;
+}
 
 const DEFAULT_INPUT_SCHEMA = {
   type: "object",
@@ -296,6 +308,7 @@ function toAliasTool(alias: AliasDefinition): Tool {
 
 function getExposedTools(): Tool[] {
   const lmTools = [...vscode.lm.tools]
+    .filter((tool) => !isWriteCapableToolBlockedByTrust(tool.name))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return buildExternalToolCatalog(
@@ -819,6 +832,13 @@ export class LmToolsMcpBridgeServer implements vscode.Disposable {
 
         return {
           content: [{ type: "text", text: getUnsupportedExternalLmToolMessage(invokeTarget.targetName) }],
+          isError: true
+        };
+      }
+
+      if (isWriteCapableToolBlockedByTrust(invokeTarget.targetName)) {
+        return {
+          content: [{ type: "text", text: getWorkspaceTrustRequiredMessage(invokeTarget.targetName) }],
           isError: true
         };
       }

@@ -13,7 +13,41 @@ export const EXTERNALLY_PROXYABLE_LM_TOOLS = new Set<string>([
   "vscodeOperator_debugGetScopes",
   "vscodeOperator_debugGetVariables",
   "vscodeOperator_debugGetExceptionInfo",
-  "vscodeOperator_debugSnapshot"
+  "vscodeOperator_debugSnapshot",
+  "vscodeOperator_readFile",
+  "vscodeOperator_writeFile",
+  "vscodeOperator_applyTextEdits",
+  "vscodeOperator_deleteFile",
+  "vscodeOperator_createDirectory",
+  "vscodeOperator_movePath",
+  "vscodeOperator_saveDocument",
+  "vscodeOperator_saveAllDocuments",
+  "vscodeOperator_runCommand",
+  "vscodeOperator_startBackgroundProcess",
+  "vscodeOperator_readProcessOutput",
+  "vscodeOperator_stopProcess",
+  "vscodeOperator_listProcesses"
+]);
+
+/**
+ * Subset of EXTERNALLY_PROXYABLE_LM_TOOLS that can write, delete, move, or
+ * execute processes. These bypass VS Code's native confirmation dialog when
+ * invoked externally (the bridge calls vscode.lm.invokeTool with
+ * toolInvocationToken: undefined, which VS Code treats as pre-approved), so
+ * they are additionally gated on workspace trust via
+ * vscodeOperator.externalMcp.requireWorkspaceTrust.
+ */
+export const WRITE_CAPABLE_EXTERNAL_LM_TOOLS = new Set<string>([
+  "vscodeOperator_writeFile",
+  "vscodeOperator_applyTextEdits",
+  "vscodeOperator_deleteFile",
+  "vscodeOperator_createDirectory",
+  "vscodeOperator_movePath",
+  "vscodeOperator_saveDocument",
+  "vscodeOperator_saveAllDocuments",
+  "vscodeOperator_runCommand",
+  "vscodeOperator_startBackgroundProcess",
+  "vscodeOperator_stopProcess"
 ]);
 
 export const KNOWN_UNSUPPORTED_EXTERNAL_LM_TOOLS = new Set<string>([
@@ -25,6 +59,17 @@ export const KNOWN_UNSUPPORTED_EXTERNAL_LM_TOOLS = new Set<string>([
   "vscodeOperator_debugControl",
   "vscodeOperator_debugEvaluate"
 ]);
+
+export function isWriteCapableExternalLmTool(name: string): boolean {
+  return WRITE_CAPABLE_EXTERNAL_LM_TOOLS.has(name);
+}
+
+export function getWorkspaceTrustRequiredMessage(toolName: string): string {
+  return [
+    `This tool can modify the workspace or execute processes and requires VS Code workspace trust to be used through the external MCP bridge: ${toolName}.`,
+    "Trust this workspace in VS Code (Command Palette > Workspaces: Manage Workspace Trust), or set vscodeOperator.externalMcp.requireWorkspaceTrust to false to bypass this check (not recommended for untrusted workspaces)."
+  ].join(" ");
+}
 
 export type NamedTool = {
   name: string;

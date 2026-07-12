@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0
+
+- 新增文件编辑工具（读/写/精确文本编辑/删除/建目录/移动/保存），以及进程执行工具（前台运行/后台进程启停与读取输出），面向 Android Studio 与 Node.js（npm/npx/vite）开发场景，均为内部 VS Code Language Model Tools，复用现有 `.vscode/vscode-operator.access.json` 保护路径策略，写入/删除/移动/运行命令类工具会触发 VS Code 原生确认对话框。 / Added file-editing tools (read/write/precise text edits/delete/create directory/move/save) and process-execution tools (foreground run, background process start/stop/read-output), targeting Android Studio and Node.js (npm/npx/vite) development. All are internal VS Code Language Model Tools, reuse the existing `.vscode/vscode-operator.access.json` protected-path policy, and write/delete/move/run-command tools trigger VS Code's native confirmation dialog.
+
 ## 1.2.9
 
 - 修复多工作区路由参数透传问题：bridge server 在调用工具前会过滤掉工具 schema 中未声明的路由参数（如 `workspacePath`），避免 `activeEditorSummary`/`hoverTopVisible` 等无参工具因收到多余字段而报错。 / Fixed routing-parameter leakage in multi-workspace mode: the bridge server now strips routing-only parameters (e.g. `workspacePath`) that are not declared in the target tool's input schema, preventing spurious "unsupported fields" errors on no-parameter tools such as `activeEditorSummary` and `hoverTopVisible`.

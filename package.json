@@ -1,7 +1,7 @@
 {
   "name": "vscode-operator",
   "displayName": "VSCode Operator",
-  "version": "1.2.9",
+  "version": "1.3.0",
   "publisher": "sumneko",
   "description": "AI that operates VS Code like a real developer through Language Model Tools and a supported local MCP bridge.",
   "main": "./dist/extension.js",
@@ -9,7 +9,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext .ts",
-    "test": "npm run compile && node --test dist/test/mcp/accessPolicy.test.js dist/test/mcp/catalog.test.js dist/test/mcp/pathGuard.test.js dist/test/mcp/workspaceTools.test.js"
+    "test": "npm run compile && node --test dist/test/mcp/accessPolicy.test.js dist/test/mcp/catalog.test.js dist/test/mcp/pathGuard.test.js dist/test/mcp/workspaceTools.test.js dist/test/mcp/processExecution.test.js"
   },
   "engines": {
     "vscode": "^1.105.0"
@@ -149,6 +149,52 @@
           "default": 60000,
           "minimum": 1,
           "description": "Reserved runtime limit for future sandboxed external MCP commands."
+        },
+        "vscodeOperator.processTools.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable vscodeOperator_runCommand/startBackgroundProcess/stopProcess. Disable to block all internal process execution tools."
+        },
+        "vscodeOperator.processTools.allowedExecutables": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "npm",
+            "npx",
+            "node",
+            "yarn",
+            "pnpm",
+            "vite",
+            "tsc",
+            "eslint",
+            "git",
+            "adb",
+            "gradlew",
+            "gradlew.bat",
+            "python",
+            "python3"
+          ],
+          "description": "Executable basenames (extension-insensitive) that vscodeOperator_runCommand and vscodeOperator_startBackgroundProcess are allowed to launch."
+        },
+        "vscodeOperator.processTools.defaultTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "description": "Default timeout for vscodeOperator_runCommand before SIGTERM/SIGKILL escalation."
+        },
+        "vscodeOperator.processTools.maxTimeoutMs": {
+          "type": "number",
+          "default": 600000,
+          "minimum": 1000,
+          "description": "Maximum timeout a caller may request for vscodeOperator_runCommand."
+        },
+        "vscodeOperator.processTools.maxOutputBytes": {
+          "type": "number",
+          "default": 1000000,
+          "minimum": 1000,
+          "description": "Maximum captured stdout/stderr bytes per command or background process before output is truncated."
         }
       }
     },
@@ -773,6 +819,473 @@
               "description": "If true, return only essential status fields."
             }
           }
+        }
+      },
+      {
+        "name": "vscodeOperator_readFile",
+        "tags": [
+          "vscode",
+          "file",
+          "read"
+        ],
+        "toolReferenceName": "readFile",
+        "displayName": "Read File",
+        "modelDescription": "Read a workspace file's text content. Reads the live in-memory editor buffer if the file is already open (including unsaved changes), otherwise reads from disk. Optionally read only a 1-based line range. Content is size-capped with a truncation flag.",
+        "userDescription": "Read a workspace file.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path, absolute or relative to workspacePath/workspace root."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve a relative path against, when multiple workspace folders are open."
+            },
+            "startLine": {
+              "type": "number",
+              "description": "1-based first line to read (inclusive). Omit to read from the start."
+            },
+            "endLine": {
+              "type": "number",
+              "description": "1-based last line to read (inclusive). Omit to read to the end."
+            },
+            "maxBytes": {
+              "type": "number",
+              "description": "Maximum UTF-8 bytes to return before truncating (default 200000, hard max 1000000)."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_writeFile",
+        "tags": [
+          "vscode",
+          "file",
+          "write"
+        ],
+        "toolReferenceName": "writeFile",
+        "displayName": "Write File",
+        "modelDescription": "Create a new file or overwrite an existing file's full content. Refuses to overwrite an existing file unless overwrite:true, and refuses to clobber an open editor with unsaved changes unless overwriteDirty:true. Blocked by deny/read-only access-policy rules.",
+        "userDescription": "Create or overwrite a file.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "path",
+            "content"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path, absolute or relative to workspacePath/workspace root."
+            },
+            "content": {
+              "type": "string",
+              "description": "Full UTF-8 text content to write."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve a relative path against."
+            },
+            "createParents": {
+              "type": "boolean",
+              "description": "Create missing parent directories. Defaults to true."
+            },
+            "overwrite": {
+              "type": "boolean",
+              "description": "Must be true to overwrite an existing file."
+            },
+            "overwriteDirty": {
+              "type": "boolean",
+              "description": "Must be true to overwrite a file that has unsaved editor changes."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_applyTextEdits",
+        "tags": [
+          "vscode",
+          "file",
+          "edit"
+        ],
+        "toolReferenceName": "applyTextEdits",
+        "displayName": "Apply Text Edits",
+        "modelDescription": "Apply one or more precise line/column range replacements to a single file through VS Code's editor edit API (undo-stack integrated, respects open unsaved buffers). Safer than writeFile for targeted changes to large files. Lines and columns are 1-based.",
+        "userDescription": "Apply precise text edits to a file.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "path",
+            "edits"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path, absolute or relative to workspacePath/workspace root."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve a relative path against."
+            },
+            "edits": {
+              "type": "array",
+              "description": "Range replacements, 1-based line/column, applied atomically to the file.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "startLine",
+                  "startColumn",
+                  "endLine",
+                  "endColumn",
+                  "newText"
+                ],
+                "properties": {
+                  "startLine": {
+                    "type": "number"
+                  },
+                  "startColumn": {
+                    "type": "number"
+                  },
+                  "endLine": {
+                    "type": "number"
+                  },
+                  "endColumn": {
+                    "type": "number"
+                  },
+                  "newText": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_deleteFile",
+        "tags": [
+          "vscode",
+          "file",
+          "delete"
+        ],
+        "toolReferenceName": "deleteFile",
+        "displayName": "Delete File",
+        "modelDescription": "Delete a workspace file or directory. Moves to the OS trash by default (recoverable); pass permanent:true to bypass trash. Deleting a non-empty directory requires recursive:true. Blocked by deny/read-only access-policy rules.",
+        "userDescription": "Delete a file or directory.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File or directory path, absolute or relative to workspacePath/workspace root."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve a relative path against."
+            },
+            "recursive": {
+              "type": "boolean",
+              "description": "Required to delete a non-empty directory."
+            },
+            "permanent": {
+              "type": "boolean",
+              "description": "Skip the OS trash and delete permanently."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_createDirectory",
+        "tags": [
+          "vscode",
+          "file",
+          "write"
+        ],
+        "toolReferenceName": "createDirectory",
+        "displayName": "Create Directory",
+        "modelDescription": "Create a directory, including missing parent directories, inside the workspace.",
+        "userDescription": "Create a directory.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Directory path, absolute or relative to workspacePath/workspace root."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve a relative path against."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_movePath",
+        "tags": [
+          "vscode",
+          "file",
+          "write"
+        ],
+        "toolReferenceName": "movePath",
+        "displayName": "Move Or Rename Path",
+        "modelDescription": "Move or rename a file or directory within the workspace. Blocked by deny/read-only access-policy rules on either endpoint.",
+        "userDescription": "Move or rename a file or directory.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "sourcePath",
+            "targetPath"
+          ],
+          "properties": {
+            "sourcePath": {
+              "type": "string",
+              "description": "Existing path, absolute or relative to workspacePath/workspace root."
+            },
+            "targetPath": {
+              "type": "string",
+              "description": "Destination path, absolute or relative to workspacePath/workspace root."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve relative paths against."
+            },
+            "overwrite": {
+              "type": "boolean",
+              "description": "Must be true to overwrite an existing file at targetPath."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_saveDocument",
+        "tags": [
+          "vscode",
+          "editor",
+          "save"
+        ],
+        "toolReferenceName": "saveDocument",
+        "displayName": "Save Document",
+        "modelDescription": "Save a single open document by path, persisting its in-memory buffer to disk.",
+        "userDescription": "Save an open document.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path of the currently open document to save."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve a relative path against."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_saveAllDocuments",
+        "tags": [
+          "vscode",
+          "editor",
+          "save"
+        ],
+        "toolReferenceName": "saveAllDocuments",
+        "displayName": "Save All Documents",
+        "modelDescription": "Save all open documents with unsaved changes. Call this before running a build/test command so on-disk state matches edited buffers. This tool takes no input fields.",
+        "userDescription": "Save all open documents.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "vscodeOperator_runCommand",
+        "tags": [
+          "vscode",
+          "process",
+          "command",
+          "npm",
+          "gradle",
+          "adb",
+          "git"
+        ],
+        "toolReferenceName": "runCommand",
+        "displayName": "Run Command",
+        "modelDescription": "Run an allowlisted executable with argument-array arguments (no shell interpolation) in a workspace-relative cwd, and wait for it to finish. Use for npm/npx/vite/node/yarn/pnpm/tsc/eslint, git, adb, gradlew/gradlew.bat, python. Returns exit code, stdout, and stderr. Times out and force-kills long-running commands; for anything meant to keep running (dev servers, adb logcat) use vscodeOperator_startBackgroundProcess instead.",
+        "userDescription": "Run a command and wait for it to finish.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "executable"
+          ],
+          "properties": {
+            "executable": {
+              "type": "string",
+              "description": "Executable name or path, e.g. 'npm', 'npx', 'git', 'adb', or './gradlew'."
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Argument list, e.g. [\"run\", \"build\"]. Never pass a shell string."
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Working directory, absolute or relative to workspacePath/workspace root. Defaults to the workspace root."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve a relative cwd against."
+            },
+            "env": {
+              "type": "object",
+              "description": "Extra environment variables merged on top of the inherited environment."
+            },
+            "timeoutMs": {
+              "type": "number",
+              "description": "Max runtime before SIGTERM/SIGKILL. Defaults to vscodeOperator.processTools.defaultTimeoutMs."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_startBackgroundProcess",
+        "tags": [
+          "vscode",
+          "process",
+          "background",
+          "dev-server",
+          "logcat"
+        ],
+        "toolReferenceName": "startBackgroundProcess",
+        "displayName": "Start Background Process",
+        "modelDescription": "Start an allowlisted executable as a long-running background process (e.g. 'npm run dev', 'vite', 'adb logcat') and return immediately with a processId. Use vscodeOperator_readProcessOutput to read buffered output and vscodeOperator_stopProcess to stop it. Always stop background processes you no longer need.",
+        "userDescription": "Start a long-running background process.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "executable"
+          ],
+          "properties": {
+            "executable": {
+              "type": "string",
+              "description": "Executable name or path, e.g. 'npm', 'npx', 'adb'."
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Argument list, e.g. [\"run\", \"dev\"]."
+            },
+            "cwd": {
+              "type": "string",
+              "description": "Working directory, absolute or relative to workspacePath/workspace root. Defaults to the workspace root."
+            },
+            "workspacePath": {
+              "type": "string",
+              "description": "Absolute workspace root to resolve a relative cwd against."
+            },
+            "env": {
+              "type": "object",
+              "description": "Extra environment variables merged on top of the inherited environment."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_readProcessOutput",
+        "tags": [
+          "vscode",
+          "process",
+          "background"
+        ],
+        "toolReferenceName": "readProcessOutput",
+        "displayName": "Read Background Process Output",
+        "modelDescription": "Read buffered stdout/stderr from a background process started with vscodeOperator_startBackgroundProcess. By default returns only output produced since the last read; pass fromStart:true for the full buffer. Also reports running/exited status and exit code.",
+        "userDescription": "Read output from a background process.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "processId"
+          ],
+          "properties": {
+            "processId": {
+              "type": "string",
+              "description": "Process id returned by vscodeOperator_startBackgroundProcess."
+            },
+            "fromStart": {
+              "type": "boolean",
+              "description": "Return the full buffered output instead of only new output."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_stopProcess",
+        "tags": [
+          "vscode",
+          "process",
+          "background"
+        ],
+        "toolReferenceName": "stopProcess",
+        "displayName": "Stop Background Process",
+        "modelDescription": "Stop a background process started with vscodeOperator_startBackgroundProcess (SIGTERM, then SIGKILL if it doesn't exit). Only processes started by this extension can be stopped.",
+        "userDescription": "Stop a background process.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "processId"
+          ],
+          "properties": {
+            "processId": {
+              "type": "string",
+              "description": "Process id returned by vscodeOperator_startBackgroundProcess."
+            }
+          }
+        }
+      },
+      {
+        "name": "vscodeOperator_listProcesses",
+        "tags": [
+          "vscode",
+          "process",
+          "background"
+        ],
+        "toolReferenceName": "listProcesses",
+        "displayName": "List Background Processes",
+        "modelDescription": "List background processes started with vscodeOperator_startBackgroundProcess, with status, command, and start time. Use this to avoid leaving stale dev servers or logcat streams running. This tool takes no input fields.",
+        "userDescription": "List tracked background processes.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
         }
       }
     ]

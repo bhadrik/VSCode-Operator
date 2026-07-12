@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
 import {
   ActiveEditorSummaryTool,
+  ApplyTextEditsTool,
   CompletionAtTool,
+  CreateDirectoryTool,
   DebugClearBreakpointsTool,
   DebugControlTool,
   DebugGetExceptionInfoTool,
@@ -15,10 +17,22 @@ import {
   DebugSetBreakpointsTool,
   DebugStartTool,
   DebugStatusTool,
+  DeleteFileTool,
   ExecuteCommandTool,
   HoverAtPositionTool,
   HoverTopVisibleTool,
-  ReadProblemsTool
+  ListProcessesTool,
+  MovePathTool,
+  ProcessRegistry,
+  ReadFileTool,
+  ReadProblemsTool,
+  ReadProcessOutputTool,
+  RunCommandTool,
+  SaveAllDocumentsTool,
+  SaveDocumentTool,
+  StartBackgroundProcessTool,
+  StopProcessTool,
+  WriteFileTool
 } from "./features";
 import { LmToolsMcpBridgeServer } from "./mcp/bridgeServer";
 import { McpProxyServer } from "./mcp/proxyServer";
@@ -27,12 +41,14 @@ import { registerAccessPolicyCommands } from "./ui/accessPolicyCommands.js";
 export function activate(context: vscode.ExtensionContext): void {
   const mcpProxy = new McpProxyServer();
   const mcpBridge = new LmToolsMcpBridgeServer();
+  const processRegistry = new ProcessRegistry();
 
   registerAccessPolicyCommands(context);
 
   context.subscriptions.push(
     mcpProxy,
     mcpBridge,
+    processRegistry,
     vscode.lm.registerTool("vscodeOperator_readProblems", new ReadProblemsTool()),
     vscode.lm.registerTool("vscodeOperator_activeEditorSummary", new ActiveEditorSummaryTool()),
     vscode.lm.registerTool("vscodeOperator_hoverTopVisible", new HoverTopVisibleTool()),
@@ -52,6 +68,19 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.lm.registerTool("vscodeOperator_debugEvaluate", new DebugEvaluateTool()),
     vscode.lm.registerTool("vscodeOperator_debugStatus", new DebugStatusTool()),
     vscode.lm.registerTool("vscodeOperator_executeCommand", new ExecuteCommandTool()),
+    vscode.lm.registerTool("vscodeOperator_readFile", new ReadFileTool()),
+    vscode.lm.registerTool("vscodeOperator_writeFile", new WriteFileTool()),
+    vscode.lm.registerTool("vscodeOperator_applyTextEdits", new ApplyTextEditsTool()),
+    vscode.lm.registerTool("vscodeOperator_deleteFile", new DeleteFileTool()),
+    vscode.lm.registerTool("vscodeOperator_createDirectory", new CreateDirectoryTool()),
+    vscode.lm.registerTool("vscodeOperator_movePath", new MovePathTool()),
+    vscode.lm.registerTool("vscodeOperator_saveDocument", new SaveDocumentTool()),
+    vscode.lm.registerTool("vscodeOperator_saveAllDocuments", new SaveAllDocumentsTool()),
+    vscode.lm.registerTool("vscodeOperator_runCommand", new RunCommandTool()),
+    vscode.lm.registerTool("vscodeOperator_startBackgroundProcess", new StartBackgroundProcessTool(processRegistry)),
+    vscode.lm.registerTool("vscodeOperator_readProcessOutput", new ReadProcessOutputTool(processRegistry)),
+    vscode.lm.registerTool("vscodeOperator_stopProcess", new StopProcessTool(processRegistry)),
+    vscode.lm.registerTool("vscodeOperator_listProcesses", new ListProcessesTool(processRegistry)),
     vscode.commands.registerCommand("vscodeOperator.mcpBridge.showStatus", async () => {
       await vscode.window.showInformationMessage(mcpBridge.getStatus());
     }),
