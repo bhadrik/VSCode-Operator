@@ -1,7 +1,7 @@
 {
   "name": "vscode-operator",
   "displayName": "VSCode Operator",
-  "version": "1.3.0",
+  "version": "1.3.2",
   "publisher": "sumneko",
   "description": "AI that operates VS Code like a real developer through Language Model Tools and a supported local MCP bridge.",
   "main": "./dist/extension.js",
@@ -9,7 +9,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext .ts",
-    "test": "npm run compile && node --test dist/test/mcp/accessPolicy.test.js dist/test/mcp/catalog.test.js dist/test/mcp/pathGuard.test.js dist/test/mcp/workspaceTools.test.js dist/test/mcp/processExecution.test.js"
+    "test": "npm run compile && node --test dist/test/mcp/accessPolicy.test.js dist/test/mcp/catalog.test.js dist/test/mcp/pathGuard.test.js dist/test/mcp/workspaceTools.test.js dist/test/mcp/processExecution.test.js dist/test/mcp/proxyRouting.test.js"
   },
   "engines": {
     "vscode": "^1.105.0"

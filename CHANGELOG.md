@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.2
+
+- Restored compatibility with local HTTP MCP dispatchers that omit `mcp-session-id` after initialization. The proxy reuses only the matching local-peer session or the sole live proxy session; concurrent ambiguous headerless traffic remains rejected rather than being routed arbitrarily.
+
+## 1.3.1
+
+- Proxy-owned workspace discovery: `vscode_workspace_status` is now available without selecting a workspace and returns every registered workspace bridge. External MCP clients can discover first, then pass `workspacePath` to workspace-specific calls.
+- Multi-workspace proxy routing now keeps one external MCP session at the proxy while lazily maintaining bridge-local sessions. An explicit valid `workspacePath` overrides prior session affinity, so one client can route calls across multiple VS Code workspaces without reconnecting.
+
 ## 1.3.0
 
 - 新增文件编辑工具（读/写/精确文本编辑/删除/建目录/移动/保存），以及进程执行工具（前台运行/后台进程启停与读取输出），面向 Android Studio 与 Node.js（npm/npx/vite）开发场景，均为内部 VS Code Language Model Tools，复用现有 `.vscode/vscode-operator.access.json` 保护路径策略，写入/删除/移动/运行命令类工具会触发 VS Code 原生确认对话框。 / Added file-editing tools (read/write/precise text edits/delete/create directory/move/save) and process-execution tools (foreground run, background process start/stop/read-output), targeting Android Studio and Node.js (npm/npx/vite) development. All are internal VS Code Language Model Tools, reuse the existing `.vscode/vscode-operator.access.json` protected-path policy, and write/delete/move/run-command tools trigger VS Code's native confirmation dialog.

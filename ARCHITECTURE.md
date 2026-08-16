@@ -153,7 +153,9 @@ Recommended session lifecycle:
 
 - Binds to `127.0.0.1:<port>` (default `19191`)
 - Receives bridge registrations via `/bridge-channel`
-- Routes `/mcp` requests by session, `workspacePath`, or fallback strategy
+- Owns the external Streamable HTTP MCP session and discovery resources, including proxy-level `vscode_workspace_status`
+- Routes workspace-specific tool requests by explicit `workspacePath`, then compatible session affinity, then the single-workspace fallback
+- Never selects an arbitrary default bridge for ambiguous workspace-specific requests
 - Exposes health endpoint `/health`
 
 ### Bridge (`src/mcp/bridgeServer.ts`)

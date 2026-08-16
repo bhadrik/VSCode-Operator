@@ -196,7 +196,19 @@ When multiple VS Code instances are running:
 1. Each runs its own MCP bridge server (auto-assigned port 19192+)
 2. All bridges register with the central proxy on port 19191
 3. MCP clients connect to the proxy endpoint: `http://127.0.0.1:19191/mcp`
-4. Include `workspacePath` parameter in tool calls to route to correct bridge:
+4. Call `vscode_workspace_status` without arguments to discover every currently registered workspace bridge. Its response is always available from the proxy, including when no workspace is connected:
+
+```json
+{
+  "workspaces": [
+    { "workspacePath": "/absolute/path/to/projectA" },
+    { "workspacePath": "/absolute/path/to/projectB" }
+  ],
+  "count": 2
+}
+```
+
+5. Include a returned `workspacePath` parameter in workspace-specific tool calls to route to the correct bridge. One MCP connection can target different workspaces on successive calls:
 
 ```json
 {
@@ -213,6 +225,8 @@ When multiple VS Code instances are running:
   }
 }
 ```
+
+`initialize`, `tools/list`, `resources/list`, and `prompts/list` are proxy-owned workspace-independent operations and do not need a workspace path. `tools/list` includes `vscode_workspace_status` with a no-argument object schema and the union of tools advertised by currently reachable bridges. If a workspace-specific call is ambiguous while multiple workspaces are connected, the proxy returns an MCP invalid-parameters error instead of choosing a default workspace.
 
 ### Customize Proxy Port
 
